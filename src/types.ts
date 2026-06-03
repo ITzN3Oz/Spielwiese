@@ -19,9 +19,6 @@ export interface GameServer {
   variables: Record<string, string>;
   created: string;
   iconUrl?: string;
-  cpuLimit?: number; // CPU limit in % (e.g., 20 - 100)
-  oomRestart?: boolean; // Auto-restart on Out Of Memory (OOM)
-  diskThrottle?: number; // Disk write limit in MB/s
 }
 
 export interface Backup {
@@ -44,8 +41,6 @@ export interface SystemStats {
   containersRunning: number;
   networkIn: number;  // MB/s
   networkOut: number; // MB/s
-  cpuHistory?: number[];
-  ramHistory?: number[];
 }
 
 export type UserRole = "admin" | "operator" | "viewer";

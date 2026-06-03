@@ -1,13 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { GameServer, SystemStats, Backup, DashboardUser, UserRole } from "./types";
-import { useLanguage } from "./LanguageContext";
 import Overview from "./components/Overview";
 import ServerCatalog from "./components/ServerCatalog";
 import ServerList from "./components/ServerList";
 import Backups from "./components/Backups";
 import UserManagement from "./components/UserManagement";
 import ApiDocs from "./components/ApiDocs";
-import Scheduler from "./components/Scheduler";
 import {
   Activity,
   Server,
@@ -25,10 +23,9 @@ import {
   Lock
 } from "lucide-react";
 
-type NavigationTab = "overview" | "servers" | "install" | "backups" | "users" | "api" | "scheduler";
+type NavigationTab = "overview" | "servers" | "install" | "backups" | "users" | "api";
 
 export default function App() {
-  const { t, language, setLanguage } = useLanguage();
   const [currentUser, setCurrentUser] = useState<DashboardUser | null>(() => {
     const saved = localStorage.getItem("gcore_current_user");
     return saved ? JSON.parse(saved) : null;
@@ -231,19 +228,7 @@ export default function App() {
   };
 
   // Actions
-  const checkPermission = (permissionKey: string, actionLabel: string): boolean => {
-    if (!currentUser) return false;
-    // Super Administrators override all granular permission checks
-    if (currentUser.role === "admin") return true;
-    if (currentUser.permissions && currentUser.permissions.includes(permissionKey)) {
-      return true;
-    }
-    showNotification(`Zugriff verweigert: Sie besitzen nicht das Recht '${actionLabel}' (${permissionKey}).`, true);
-    return false;
-  };
-
   const handleInstallServer = async (installData: any) => {
-    if (!checkPermission("install", "Server installieren")) return;
     setIsInstalling(true);
     setErrorMessage(null);
     try {
@@ -269,7 +254,6 @@ export default function App() {
   };
 
   const handleToggleServer = async (id: string) => {
-    if (!checkPermission("start_stop", "Server Starten / Stoppen")) return;
     try {
       const res = await fetch(`/api/servers/${id}/toggle`, {
         method: "POST"
@@ -288,7 +272,6 @@ export default function App() {
   };
 
   const handleUpdateServer = async (id: string) => {
-    if (!checkPermission("update", "Updates einspielen")) return;
     try {
       const res = await fetch(`/api/servers/${id}/update`, {
         method: "POST"
@@ -303,7 +286,6 @@ export default function App() {
   };
 
   const handleDeleteServer = async (id: string) => {
-    if (!checkPermission("install", "Server deinstallieren")) return;
     try {
       const res = await fetch(`/api/servers/${id}`, {
         method: "DELETE"
@@ -319,7 +301,6 @@ export default function App() {
   };
 
   const handleSaveConfig = async (id: string, updateData: Partial<GameServer>) => {
-    if (!checkPermission("update", "Updates & Mods verwalten")) return;
     try {
       const res = await fetch(`/api/servers/${id}`, {
         method: "PUT",
@@ -336,7 +317,6 @@ export default function App() {
   };
 
   const handleCreateBackup = async (serverId: string, backupName?: string) => {
-    if (!checkPermission("backups", "Backup-Rechte")) return;
     setIsBackupProcessing(true);
     try {
       const res = await fetch(`/api/backups/${serverId}`, {
@@ -356,7 +336,6 @@ export default function App() {
   };
 
   const handleRestoreBackup = async (backupId: string) => {
-    if (!checkPermission("backups", "Backup-Rechte")) return;
     setIsBackupProcessing(true);
     try {
       const res = await fetch(`/api/backups/restore/${backupId}`, {
@@ -374,7 +353,6 @@ export default function App() {
   };
 
   const handleDeleteBackup = async (backupId: string) => {
-    if (!checkPermission("backups", "Backup-Rechte")) return;
     try {
       const res = await fetch(`/api/backups/${backupId}`, {
         method: "DELETE"
@@ -389,7 +367,6 @@ export default function App() {
   };
 
   const handleAddUser = async (userData: { username: string; role: UserRole; permissions: string[] }) => {
-    if (!checkPermission("users", "Nutzerverwaltung")) return;
     try {
       const res = await fetch("/api/users", {
         method: "POST",
@@ -406,7 +383,6 @@ export default function App() {
   };
 
   const handleUpdateUser = async (id: string, updateData: Partial<DashboardUser>) => {
-    if (!checkPermission("users", "Nutzerverwaltung")) return;
     try {
       const res = await fetch(`/api/users/${id}`, {
         method: "PUT",
@@ -423,7 +399,6 @@ export default function App() {
   };
 
   const handleDeleteUser = async (id: string) => {
-    if (!checkPermission("users", "Nutzerverwaltung")) return;
     try {
       const res = await fetch(`/api/users/${id}`, {
         method: "DELETE"
@@ -442,7 +417,7 @@ export default function App() {
       <div className="min-h-screen bg-[#070709] flex items-center justify-center">
         <div className="text-center space-y-3">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500 mx-auto"></div>
-          <p className="text-xs text-neutral-500 font-mono">{t("common.loading", "Lese Systemeinrichtung...")}</p>
+          <p className="text-xs text-neutral-500 font-mono">Lese Systemeinrichtung...</p>
         </div>
       </div>
     );
@@ -459,23 +434,23 @@ export default function App() {
               <ShieldCheck className="w-6 h-6 text-indigo-400" />
             </div>
             <h1 className="text-lg font-extrabold tracking-tight text-white uppercase font-sans">
-              {t("login.setupRequired", "ERSTEINRICHTUNG")}
+              ERSTEINRICHTUNG
             </h1>
-            <p className="text-xs text-indigo-400 font-mono mt-1">{t("login.setupRequired", "Super-Administrator anlegen")}</p>
+            <p className="text-xs text-indigo-400 font-mono mt-1">Super-Administrator anlegen</p>
             <p className="text-neutral-450 text-[11px] mt-3 leading-relaxed">
-              {t("login.setupSubtitle", "Willkommen bei Ihrer Spieleserver-Umgebung! Erstellen Sie hier den initialen Haupt-Admin-Account mit vollen Berechtigungen.")}
+              Willkommen bei Ihrer Spieleserver-Umgebung! Erstellen Sie hier den initialen Haupt-Admin-Account mit vollen Berechtigungen.
             </p>
           </div>
 
           <form onSubmit={handleSetupSubmit} className="space-y-4">
             <div>
               <label className="block text-xxs font-bold uppercase tracking-wider text-neutral-450 mb-1.5 font-mono">
-                {t("login.username", "Super-Admin Benutzername")}
+                Super-Admin Benutzername
               </label>
               <input
                 type="text"
                 required
-                placeholder="e.g. admin"
+                placeholder="z.B. admin oder kilian"
                 value={setupUsername}
                 onChange={(e) => setSetupUsername(e.target.value)}
                 className="w-full bg-[#1c1c24] border border-[#24242a] rounded-lg px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-sans"
@@ -484,12 +459,12 @@ export default function App() {
 
             <div>
               <label className="block text-xxs font-bold uppercase tracking-wider text-neutral-450 mb-1.5 font-mono">
-                {t("login.password", "Sicheres Admin-Passwort")}
+                Sicheres Admin-Passwort
               </label>
               <input
                 type="password"
                 required
-                placeholder="••••••••"
+                placeholder="Passwort eingeben"
                 value={setupPassword}
                 onChange={(e) => setSetupPassword(e.target.value)}
                 className="w-full bg-[#1c1c24] border border-[#24242a] rounded-lg px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-sans"
@@ -508,7 +483,7 @@ export default function App() {
               disabled={isSettingUp}
               className="w-full disabled:opacity-55 text-white font-extrabold text-xs py-3 px-4 rounded-lg shadow-lg cursor-pointer bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/10 uppercase tracking-wide transition-all"
             >
-              {isSettingUp ? t("common.loading", "Richtet ein...") : t("login.setupBtn", "ERSTEINRICHTUNG ABSCHLIESSEN & EINLOGGEN")}
+              {isSettingUp ? "Richtet ein..." : "ERSTEINRICHTUNG ABSCHLIESSEN & EINLOGGEN"}
             </button>
           </form>
         </div>
@@ -534,53 +509,22 @@ export default function App() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
             </div>
-            <h1 className="text-2xl font-black tracking-widest text-[#d4af37] uppercase font-royal animate-pulse">
-              Gameserver Labor
+            <h1 className="text-xl font-extrabold tracking-tight text-white uppercase font-sans">
+              Kilians Spielwiese
             </h1>
-            <p className="text-xs text-neutral-400 font-mono mt-1">{t("login.subtitle", "Docker Linux Control Login System")}</p>
-          </div>
-
-          {/* Language Switcher inside Login card */}
-          <div className="flex bg-[#1c1c24] border border-[#24242a] p-1.5 rounded-xl justify-between items-center text-xs">
-            <span className="text-[10px] font-mono text-neutral-450 uppercase pl-2 font-bold">Language / Sprache:</span>
-            <div className="flex gap-1 pr-1 bg-neutral-950/40 rounded-lg p-0.5 border border-neutral-900">
-              {[
-                { code: "en", label: "EN" },
-                { code: "de", label: "DE" },
-                { code: "fr", label: "FR" },
-                { code: "es", label: "ES" }
-              ].map((lang) => (
-                <button
-                  key={lang.code}
-                  type="button"
-                  onClick={() => setLanguage(lang.code as any)}
-                  className={`px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase transition-all cursor-pointer ${
-                    language === lang.code
-                      ? (
-                          accentColor === "indigo" ? "bg-indigo-650 text-white" :
-                          accentColor === "emerald" ? "bg-emerald-650 text-white" :
-                          accentColor === "orange" ? "bg-orange-650 text-white" :
-                          "bg-pink-650 text-white"
-                        )
-                      : "text-neutral-500 hover:text-neutral-300"
-                  }`}
-                >
-                  {lang.label}
-                </button>
-              ))}
-            </div>
+            <p className="text-xs text-neutral-400 font-mono mt-1">Docker Linux Control Login System</p>
           </div>
 
           {/* Form */}
           <form onSubmit={handleLoginSubmit} className="space-y-4">
             <div>
               <label className="block text-xxs font-bold uppercase tracking-wider text-neutral-450 mb-1.5 font-mono">
-                {t("login.username", "Benutzername")}
+                Benutzername
               </label>
               <input
                 type="text"
                 required
-                placeholder="e.g. admin"
+                placeholder="Name eingeben (z.B. admin)"
                 value={loginUsername}
                 onChange={(e) => setLoginUsername(e.target.value)}
                 className={`w-full bg-[#1c1c24] border border-[#24242a] rounded-lg px-3.5 py-2.5 text-xs text-white focus:outline-none transition-all ${
@@ -595,13 +539,13 @@ export default function App() {
             <div>
               <div className="flex justify-between items-center mb-1.5">
                 <label className="block text-xxs font-bold uppercase tracking-wider text-neutral-450 font-mono">
-                  {t("login.password", "Kennwort / Passwort")}
+                  Kennwort / Passwort
                 </label>
               </div>
               <input
                 type="password"
                 required
-                placeholder="••••••••"
+                placeholder="Passwort eingeben"
                 value={loginPassword}
                 onChange={(e) => setLoginPassword(e.target.value)}
                 className={`w-full bg-[#1c1c24] border border-[#24242a] rounded-lg px-3.5 py-2.5 text-xs text-white focus:outline-none transition-all ${
@@ -630,7 +574,7 @@ export default function App() {
                 "bg-pink-600 hover:bg-pink-500 shadow-pink-500/10"
               }`}
             >
-              {isLoggingIn ? t("common.loading", "Authentifizierung...") : t("login.submitBtn", "IM SYSTEM ANMELDEN")}
+              {isLoggingIn ? "Authentifizierung..." : "IM SYSTEM ANMELDEN"}
             </button>
           </form>
         </div>
@@ -708,9 +652,9 @@ export default function App() {
               </svg>
             </div>
             <div>
-              <h1 className="text-sm font-black tracking-wider text-white uppercase font-royal flex flex-col leading-tight">
-                <span className="text-[#d4af37]">Gameserver</span>
-                <span className={`text-[10px] tracking-widest transition-colors duration-300 ${accentColorText}`}>Labor</span>
+              <h1 className="text-sm font-extrabold tracking-tight text-white uppercase flex flex-col">
+                <span>Kilians</span>
+                <span className={`text-xs font-mono transition-colors duration-300 ${accentColorText}`}>Spielwiese</span>
               </h1>
               <p className="text-[9px] text-neutral-500 font-mono tracking-widest uppercase">Linux Control v2.4</p>
             </div>
@@ -723,7 +667,7 @@ export default function App() {
               className={`w-full flex items-center gap-3 px-3.5 py-3.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${getNavButtonClass("overview")}`}
             >
               <Activity className="w-4.5 h-4.5" />
-              {t("nav.overview", "Ressourcen-Überwachung")}
+              Ressourcen-Überwachung
             </button>
 
             <button
@@ -731,7 +675,7 @@ export default function App() {
               className={`w-full flex items-center gap-3 px-3.5 py-3.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${getNavButtonClass("servers")}`}
             >
               <Server className="w-4.5 h-4.5" />
-              {t("nav.servers", "Spieleserver verwalten")}
+              Spieleserver verwalten
             </button>
 
             <button
@@ -741,7 +685,7 @@ export default function App() {
               <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 4v16m8-8H4" />
               </svg>
-              {t("nav.install", "Server installieren")}
+              Server installieren
             </button>
 
             <button
@@ -749,7 +693,7 @@ export default function App() {
               className={`w-full flex items-center gap-3 px-3.5 py-3.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${getNavButtonClass("backups")}`}
             >
               <Archive className="w-4.5 h-4.5" />
-              {t("nav.backups", "Backup & Recovery")}
+              Backup & Recovery
             </button>
 
             <button
@@ -757,15 +701,7 @@ export default function App() {
               className={`w-full flex items-center gap-3 px-3.5 py-3.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${getNavButtonClass("users")}`}
             >
               <Users className="w-4.5 h-4.5" />
-              {t("nav.users", "Nutzerrechte verwalten")}
-            </button>
-
-            <button
-              onClick={() => setActiveTab("scheduler")}
-              className={`w-full flex items-center gap-3 px-3.5 py-3.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${getNavButtonClass("scheduler")}`}
-            >
-              <Clock className="w-4.5 h-4.5" />
-              {t("nav.scheduler", "Aufgabenplanung (Cron)")}
+              Nutzerrechte verwalten
             </button>
 
             <button
@@ -773,7 +709,7 @@ export default function App() {
               className={`w-full flex items-center gap-3 px-3.5 py-3.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${getNavButtonClass("api")}`}
             >
               <Terminal className="w-4.5 h-4.5" />
-              {t("nav.api", "API Dokumentation")}
+              API Dokumentation
             </button>
           </nav>
         </div>
@@ -792,7 +728,7 @@ export default function App() {
             </div>
             <button
               onClick={handleLogout}
-              className="px-2 py-1 bg-red-952/15 text-red-500 hover:text-red-400 hover:bg-red-952/35 border border-red-900/30 hover:border-red-500/30 text-[9px] font-extrabold rounded cursor-pointer transition-colors font-mono tracking-wider"
+              className="px-2 py-1 bg-red-950/15 text-red-500 hover:text-red-400 hover:bg-red-952/35 border border-red-900/30 hover:border-red-500/30 text-[9px] font-extrabold rounded cursor-pointer transition-colors font-mono tracking-wider"
               title="Sichere Abmeldung aus der Host-Session"
             >
               OUT
@@ -807,55 +743,23 @@ export default function App() {
         <header className="h-16 px-8 flex items-center justify-between border-b border-[#24242a]/60 flex-shrink-0 bg-[#070709]/80 backdrop-blur-md relative z-10">
           <div className="flex items-center gap-4">
             <h2 className="text-base font-bold text-white tracking-wide uppercase">
-              {activeTab === "overview" && t("nav.headerOverview", "System Dashboard")}
-              {activeTab === "servers" && t("nav.headerServers", "Server Control")}
-              {activeTab === "install" && t("nav.headerInstall", "Application Catalog")}
-              {activeTab === "backups" && t("nav.headerBackups", "Data Backups")}
-              {activeTab === "users" && t("nav.headerUsers", "User Permissions")}
-              {activeTab === "scheduler" && t("nav.headerScheduler", "Aufgabenplanung (Cron)")}
-              {activeTab === "api" && t("nav.headerApi", "API Connection")}
+              {activeTab === "overview" && "System Dashboard"}
+              {activeTab === "servers" && "Server-Steuerung"}
+              {activeTab === "install" && "Anwendungskatalog"}
+              {activeTab === "backups" && "Datensicherung"}
+              {activeTab === "users" && "Nutzerberechtigungen"}
+              {activeTab === "api" && "API-Anbindung"}
             </h2>
             <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-950/30 text-emerald-400 border border-emerald-500/20 flex items-center gap-1 shadow-sm">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-              {t("nav.hostOnline", "LINUX HOST ONLINE")}
+              LINUX HOST ONLINE
             </span>
           </div>
 
           <div className="flex items-center gap-4 md:gap-5">
-            {/* Language Selection Switcher */}
-            <div className="flex items-center gap-2 bg-[#121216] border border-neutral-850 px-2.5 py-1.5 rounded-xl text-neutral-350 select-none">
-              <span className="text-[9px] font-mono text-neutral-500 uppercase font-bold tracking-wider">LANG:</span>
-              <div className="flex bg-neutral-950/70 p-0.5 rounded-lg border border-neutral-900">
-                {[
-                  { code: "en", label: "EN" },
-                  { code: "de", label: "DE" },
-                  { code: "fr", label: "FR" },
-                  { code: "es", label: "ES" }
-                ].map((lang) => (
-                  <button
-                    key={lang.code}
-                    type="button"
-                    onClick={() => setLanguage(lang.code as any)}
-                    className={`px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase transition-all cursor-pointer ${
-                      language === lang.code
-                        ? (
-                            accentColor === "indigo" ? "bg-indigo-650 text-white" :
-                            accentColor === "emerald" ? "bg-emerald-650 text-white" :
-                            accentColor === "orange" ? "bg-orange-650 text-white" :
-                            "bg-pink-650 text-white"
-                          )
-                        : "text-neutral-500 hover:text-neutral-300"
-                    }`}
-                  >
-                    {lang.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* Atmosphere Mode Switcher */}
             <div className="flex items-center gap-2 bg-[#121216] border border-neutral-850 px-2.5 py-1.5 rounded-xl text-neutral-350 select-none">
-              <span className="text-[9px] font-mono text-neutral-500 uppercase font-bold tracking-wider">{t("nav.atmosphere", "Hintergrund:")}</span>
+              <span className="text-[9px] font-mono text-neutral-500 uppercase font-bold tracking-wider">Hintergrund:</span>
               <div className="flex bg-neutral-950/70 p-0.5 rounded-lg border border-neutral-900">
                 {[
                   { name: "solid", label: "Sleek" },
@@ -886,7 +790,7 @@ export default function App() {
 
             {/* Design Config Mode Switcher */}
             <div className="flex items-center gap-2 bg-[#121216] border border-neutral-850 px-3 py-1.5 rounded-xl text-neutral-350 select-none">
-              <span className="text-[9px] font-mono text-neutral-500 uppercase font-bold tracking-wider">{t("nav.accentColor", "Farbe:")}</span>
+              <span className="text-[9px] font-mono text-neutral-500 uppercase font-bold tracking-wider">Farbe:</span>
               <div className="flex items-center gap-1.5">
                 {[
                   { name: "indigo", color: "bg-indigo-600", label: "Midnight Blue" },
@@ -912,13 +816,13 @@ export default function App() {
                 onClick={() => setActiveTab("install")}
                 className={`text-white text-xs px-3.5 py-1.8 rounded-lg font-bold tracking-wide transition-all duration-300 flex items-center gap-1.5 shadow-md cursor-pointer ${
                   accentColor === "indigo" ? "bg-indigo-600 hover:bg-indigo-505" :
-                  accentColor === "emerald" ? "bg-emerald-650 text-white" :
+                  accentColor === "emerald" ? "bg-emerald-600 hover:bg-emerald-500" :
                   accentColor === "orange" ? "bg-orange-600 hover:bg-orange-500" :
                   "bg-pink-650 hover:bg-pink-500"
                 }`}
               >
                 <Plus className="w-3.5 h-3.5" />
-                {t("nav.quickInstall", "Server installieren")}
+                Server installieren
               </button>
             )}
           </div>
@@ -980,20 +884,6 @@ export default function App() {
               onAddUser={handleAddUser}
               onUpdateUser={handleUpdateUser}
               onDeleteUser={handleDeleteUser}
-            />
-          )}
-
-          {activeTab === "scheduler" && (
-            <Scheduler
-              servers={servers}
-              accentColor={accentColor}
-              onTriggerAction={(msg, isError) => {
-                if (isError) {
-                  showNotification(msg, true);
-                } else {
-                  showNotification(msg);
-                }
-              }}
             />
           )}
 

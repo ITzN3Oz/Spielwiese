@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { GameServer } from "../types";
 import FloatingWindow from "./FloatingWindow";
-import { useLanguage } from "../LanguageContext";
 import { GAME_TEMPLATES } from "./ServerCatalog";
 import {
   Folder,
@@ -433,7 +432,6 @@ const PRESET_MODS_RICH: Record<string, Omit<ServerMod, "installed">[]> = {
 };
 
 export default function ServerModsManager({ server, onClose, onAddConsoleLog }: ServerModsManagerProps) {
-  const { t } = useLanguage();
   const [activeSubTab, setActiveSubTab] = useState<"mods" | "files">("mods");
   const [viewMode, setViewMode] = useState<"list" | "gallery">("gallery");
   const [selectedImageIndex, setSelectedImageIndex] = useState<number>(0);
@@ -445,8 +443,6 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
   const [installingModId, setInstallingModId] = useState<string | null>(null);
   const [installStep, setInstallStep] = useState("");
   const [installProgress, setInstallProgress] = useState(0);
-  const [installedModIds, setInstalledModIds] = useState<string[]>([]);
-  const [isLoadingLiveMods, setIsLoadingLiveMods] = useState(false);
 
   // Simulated Video Player status
   const [isPlayingVideo, setIsPlayingVideo] = useState(false);
@@ -496,8 +492,6 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
       const resMods = await fetch(`/api/servers/${server.id}/mods`);
       if (resMods.ok) {
         const installedModsIds: string[] = await resMods.json();
-        setInstalledModIds(installedModsIds);
-
         const baseMods = PRESET_MODS_RICH[server.game] || PRESET_MODS_RICH["minecraft"]; // Fallback to MC mods
 
         const initializedMods = baseMods.map((bm) => ({
@@ -505,12 +499,9 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
           installed: installedModsIds.includes(bm.id)
         })) as ServerMod[];
 
-        // Only overwrite local list if search query is empty
-        if (!modSearch.trim()) {
-          setModsList(initializedMods);
-          if (initializedMods.length > 0 && !selectedMod) {
-            handleSelectMod(initializedMods[0]);
-          }
+        setModsList(initializedMods);
+        if (initializedMods.length > 0 && !selectedMod) {
+          handleSelectMod(initializedMods[0]);
         }
       }
     } catch (err) {
@@ -524,65 +515,74 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
     setIsPlayingVideo(false);
   };
 
-  // Dynamic live search for Mods via Modrinth / GitHub with debounce support
-  useEffect(() => {
-    const query = modSearch.toLowerCase().trim();
+  const handleSearchMods = () => {
     const baseMods = PRESET_MODS_RICH[server.game] || PRESET_MODS_RICH["minecraft"];
+    const query = modSearch.toLowerCase().trim();
 
     if (!query) {
-      const initialized = baseMods.map((bm) => ({
-        ...bm,
-        installed: installedModIds.includes(bm.id)
-      })) as ServerMod[];
-      setModsList(initialized);
+      fetchInstalledModsAndFiles();
       return;
     }
 
-    const filteredLocal = baseMods.filter(
+    const filtered = baseMods.filter(
       (m) => m.name.toLowerCase().includes(query) || m.description.toLowerCase().includes(query)
-    ).map((bm) => ({
-      ...bm,
-      installed: installedModIds.includes(bm.id)
-    })) as ServerMod[];
+    );
 
-    setIsLoadingLiveMods(true);
+    const hasPerfectMatch = filtered.some((m) => m.name.toLowerCase() === query);
 
-    const delayDebounce = setTimeout(() => {
-      fetch(`/api/mods/search?game=${encodeURIComponent(server.game)}&query=${encodeURIComponent(query)}`)
-        .then((res) => {
-          if (!res.ok) throw new Error("Search mods network error");
-          return res.json();
-        })
-        .then((data) => {
-          if (Array.isArray(data)) {
-            const externalResults = data.map((item) => ({
-              ...item,
-              installed: installedModIds.includes(item.id)
-            })) as ServerMod[];
+    const results = filtered.map((bm) => {
+      const isInst = filesList.some(f => f.name.toLowerCase().includes(bm.id));
+      return { ...bm, installed: isInst };
+    }) as ServerMod[];
 
-            // Merge local & external without duplicates
-            const merged = [...filteredLocal];
-            externalResults.forEach((ext) => {
-              if (!merged.some((m) => m.id === ext.id)) {
-                merged.push(ext);
-              }
-            });
+    // Support searching ANY arbitrary game mod dynamically
+    if (!hasPerfectMatch && query.length > 1) {
+      const capitalizedQuery = query.charAt(0).toUpperCase() + query.slice(1);
+      const dynamicMod: ServerMod = {
+        id: `steam-${query.replace(/\s+/g, "-")}`,
+        name: `${capitalizedQuery} Expansion Patch`,
+        version: "2.4.0-release",
+        author: "WorkshopCommunity_Dev",
+        downloads: "6.2 K",
+        description: `Individuell geladene Workshop-Komponente '${capitalizedQuery}' von dem Community-Hub. Komplett sandboxed und volumensicher.`,
+        longDescription: `Diese Drittanbieter-Erweiterung für ${server.name} wurde direkt über das SteamCMD / Curse Public Repository ermittelt. Das Paket beinhaltet binäre Konfigurationsdateien, automatische Logging-Anbindung sowie optimierte Container-Pfade.`,
+        imageBg: "from-indigo-900 via-[#121216] to-[#0c0c0d]",
+        videoType: "custom",
+        origin: "Steam Workshop",
+        rating: 4.5,
+        fileSize: "18.2 MB",
+        dependencies: [],
+        defaultConfigs: {
+          "enabled": "true",
+          "update-on-startup": "true",
+          "debug-logs": "false",
+          "intensity-modifier": "1.0"
+        },
+        previewImages: [
+          "https://images.unsplash.com/photo-1614064641938-3bbee52942c7?w=600&auto=format&fit=crop&q=60",
+          "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=600&auto=format&fit=crop&q=60"
+        ],
+        detailedFeatures: [
+          "Dynamische Einbindung über SteamCMD / CurseForge.",
+          "Voll integrierte Live-Protokollierung im Host-Log.",
+          "Verbindet Container-Dateischnittstellen nahtlos."
+        ],
+        verificationScore: 82,
+        trustedHub: false,
+        installed: false
+      };
+      results.push(dynamicMod);
+    }
 
-            setModsList(merged);
-            if (merged.length > 0 && (!selectedMod || !merged.some((m) => m.id === selectedMod.id))) {
-              handleSelectMod(merged[0]);
-            }
-          }
-        })
-        .catch((err) => {
-          console.error("Dynamic web mods look up failed:", err);
-          setModsList(filteredLocal);
-        })
-        .finally(() => setIsLoadingLiveMods(false));
-    }, 400);
+    setModsList(results);
+    if (results.length > 0) {
+      handleSelectMod(results[0]);
+    }
+  };
 
-    return () => clearTimeout(delayDebounce);
-  }, [modSearch, installedModIds, server.game]);
+  useEffect(() => {
+    handleSearchMods();
+  }, [modSearch]);
 
   // Procedural ASCII Gameplay video simulation ticker
   useEffect(() => {
@@ -595,7 +595,7 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
         if (selectedMod.videoType === "mc_build") {
           const frames = [
             `[RENDER] WorldEdit brush selected: sphere (radius 5)\n[GRID] Coordinates: X:102, Y:64, Z:-309\n[WORLD] Modifying player active volume chunks...\n\n   ███████\n  █████████\n  ██   ████\n   ███████\n\n[SUCCESS] 2,450 blocks placed by brush action (took 4ms).`,
-            `[DYNMAP] Rendering web map viewport zoom factor 3...\n[RENDER] Layer-0 static terrain layout caching.\n\n   ░░░░░░░░\n   ▒▒▒▒▒▒▒▒  [Spawning player: Operator]\n   ▓▓▓▓▓▓▓▓\n\n[STATUS] Map frame successfully written to dynmap_web.bin.`,
+            `[DYNMAP] Rendering web map viewport zoom factor 3...\n[RENDER] Layer-0 static terrain layout caching.\n\n   ░░░░░░░░\n   ▒▒▒▒▒▒▒▒  [Spawning player: Kilian]\n   ▓▓▓▓▓▓▓▓\n\n[STATUS] Map frame successfully written to dynmap_web.bin.`,
             `[SECURITY] Verification of WorldEdit dependencies...\n[OK] Core permissions resolved with standard luckperms rule file.\n\n   [ADMIN_CHECK] Key validated.\n   [DOCKER] Container is healthy.`,
             `[ENGINE] Re-building chunks for WorldEdit operation ID #92\n[WORLD] Undo memory buffered size: 4.1MB.\n\n   ▄▄▄▄▄\n   █   █\n   ▀▀▀▀▀\n\n[INFO] Minecraft Spigot Paper thread is running at stable 20.0 TPS.`
           ];
@@ -1116,8 +1116,8 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
               <div className="w-full h-44 bg-neutral-950/80 rounded-lg border border-neutral-900 flex flex-col items-center justify-center text-center p-6 space-y-3.5">
                 <Play className="w-8 h-8 text-indigo-400 cursor-pointer hover:scale-110 transition-transform" onClick={() => setIsPlayingVideo(true)} />
                 <div>
-                  <p className="text-xs text-neutral-300 font-bold">{t("mods.previewTitle", "Interaktive Mod-Videovorschau laden")}</p>
-                  <p className="text-[10px] text-neutral-550 max-w-sm mt-0.5">{t("mods.previewSub", "Startet eine prozedurale Echtzeit-Dokumentation direkt in der Gameserver Labor Sandbox.")}</p>
+                  <p className="text-xs text-neutral-300 font-bold">Interaktive Mod-Videovorschau laden</p>
+                  <p className="text-[10px] text-neutral-550 max-w-sm mt-0.5">Startet eine prozedurale Echtzeit-Dokumentation direkt in Kilians Sandbox.</p>
                 </div>
               </div>
             )}
@@ -1294,11 +1294,7 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
               <div className="px-6 py-4 border-b border-neutral-850/80 bg-neutral-900/10 flex flex-col md:flex-row md:items-center justify-between gap-4 flex-shrink-0">
                 <div className="flex-1 max-w-lg relative">
                   <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-neutral-500">
-                    {isLoadingLiveMods ? (
-                      <RefreshCw className="w-4 h-4 text-indigo-400 animate-spin" />
-                    ) : (
-                      <Search className="w-4 h-4" />
-                    )}
+                    <Search className="w-4 h-4" />
                   </span>
                   <input
                     type="text"
@@ -1738,7 +1734,7 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
             <span>•</span>
             <span className="flex items-center gap-1.5 border border-indigo-900/50 px-2 py-0.5 rounded bg-indigo-950/25"><Cpu className="w-3 h-3 text-indigo-400" /> API: Live sync</span>
           </div>
-          <span className="text-indigo-450 uppercase">Gameserver Labor Workshop Core 2.0-STABLE</span>
+          <span className="text-indigo-450 uppercase">Kilians Spielwiese Workshop Core 2.0-STABLE</span>
         </div>
 
     </FloatingWindow>

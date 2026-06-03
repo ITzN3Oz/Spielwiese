@@ -1,5 +1,5 @@
 {
-  "name": "Gameserver Labor",
+  "name": "Kilians Spielwiese",
   "description": "Intuitives Control Panel zur Verwaltung, Überwachung und automatischen Sicherung von Docker-basierten Spieleservern auf Linux.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
