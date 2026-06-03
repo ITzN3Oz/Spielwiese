@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { GameTemplate } from "../types";
 import { Server, Cpu, Layers, HardDrive, Plus, Info, Globe, Sparkles, Search, Command } from "lucide-react";
+import { useLanguage } from "../LanguageContext";
 import GameIcon from "./GameIcon";
 
 interface ServerCatalogProps {
@@ -27,7 +28,7 @@ export const GAME_TEMPLATES: GameTemplate[] = [
     recommendedRam: 4096,
     defaultVariables: {
       EULA: "TRUE",
-      MOTD: "Willkommen auf Kilians Spielwiese Minecraft-Server!",
+      MOTD: "Willkommen auf Gameserver Labor Minecraft-Server!",
       DIFFICULTY: "normal",
       TYPE: "PAPER",
       ONLINE_MODE: "true"
@@ -42,7 +43,7 @@ export const GAME_TEMPLATES: GameTemplate[] = [
     description: "Hardcore postapokalyptischer Online-Überlebenskampf. Beinhaltet vorkonfiguriertes Epoch/DayZ-Expansion System und BattlEye-Schutz.",
     recommendedRam: 8192,
     defaultVariables: {
-      SERVER_NAME: "Kilians Spielwiese DayZ Server",
+      SERVER_NAME: "Gameserver Labor DayZ Server",
       PASSWORD: "",
       ADMIN_PASSWORD: "rconSecureDayZ1",
       MAX_PLAYERS: "40",
@@ -133,7 +134,7 @@ export const GAME_TEMPLATES: GameTemplate[] = [
     description: "Kooperative Fabrikplanung aus der Ego-Perspektive. Stabiles Threading zur Vermeidung von Sync-Latenzen bei großen Konstrukten.",
     recommendedRam: 8192,
     defaultVariables: {
-      SERVER_NAME: "Kilians FICSIT Plant",
+      SERVER_NAME: "Gameserver Labor FICSIT Plant",
       MAX_PLAYERS: "10",
       LOG_LEVEL: "info"
     }
@@ -171,6 +172,7 @@ export const GAME_TEMPLATES: GameTemplate[] = [
 ];
 
 export default function ServerCatalog({ onInstall, isInstalling }: ServerCatalogProps) {
+  const { t } = useLanguage();
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<GameTemplate[]>([]);
   const [isLoadingSearch, setIsLoadingSearch] = useState(false);
@@ -321,7 +323,7 @@ export default function ServerCatalog({ onInstall, isInstalling }: ServerCatalog
       description: `Automatisch generiertes isolated Docker Volume-Setup für '${cleanName}'. Initialisiert mit SteamCMD-Diensten und Linux-Bridge Netzwerkports.`,
       recommendedRam: 6144,
       defaultVariables: {
-        SERVER_NAME: `Kilians Spielwiese ${cleanName} Server`,
+        SERVER_NAME: `Gameserver Labor ${cleanName} Server`,
         EULA: "TRUE",
         STEAM_APP_ID: "00000",
         RCON_ENABLED: "true"
@@ -370,7 +372,7 @@ export default function ServerCatalog({ onInstall, isInstalling }: ServerCatalog
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Namen des Spiels eingeben... z.B. DaZ, Minecraft, Rust, Ark, Palworld, Satisfactory..."
+            placeholder={t("catalog.searchPlaceholder", "Search games or docker images...")}
             className="w-full bg-[#121216] border border-[#24242a] rounded-lg pl-9 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-505 placeholder-neutral-550 font-sans shadow"
           />
         </div>

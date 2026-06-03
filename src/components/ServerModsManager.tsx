@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { GameServer } from "../types";
 import FloatingWindow from "./FloatingWindow";
+import { useLanguage } from "../LanguageContext";
 import { GAME_TEMPLATES } from "./ServerCatalog";
 import {
   Folder,
@@ -432,6 +433,7 @@ const PRESET_MODS_RICH: Record<string, Omit<ServerMod, "installed">[]> = {
 };
 
 export default function ServerModsManager({ server, onClose, onAddConsoleLog }: ServerModsManagerProps) {
+  const { t } = useLanguage();
   const [activeSubTab, setActiveSubTab] = useState<"mods" | "files">("mods");
   const [viewMode, setViewMode] = useState<"list" | "gallery">("gallery");
   const [selectedImageIndex, setSelectedImageIndex] = useState<number>(0);
@@ -593,7 +595,7 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
         if (selectedMod.videoType === "mc_build") {
           const frames = [
             `[RENDER] WorldEdit brush selected: sphere (radius 5)\n[GRID] Coordinates: X:102, Y:64, Z:-309\n[WORLD] Modifying player active volume chunks...\n\n   ███████\n  █████████\n  ██   ████\n   ███████\n\n[SUCCESS] 2,450 blocks placed by brush action (took 4ms).`,
-            `[DYNMAP] Rendering web map viewport zoom factor 3...\n[RENDER] Layer-0 static terrain layout caching.\n\n   ░░░░░░░░\n   ▒▒▒▒▒▒▒▒  [Spawning player: Kilian]\n   ▓▓▓▓▓▓▓▓\n\n[STATUS] Map frame successfully written to dynmap_web.bin.`,
+            `[DYNMAP] Rendering web map viewport zoom factor 3...\n[RENDER] Layer-0 static terrain layout caching.\n\n   ░░░░░░░░\n   ▒▒▒▒▒▒▒▒  [Spawning player: Operator]\n   ▓▓▓▓▓▓▓▓\n\n[STATUS] Map frame successfully written to dynmap_web.bin.`,
             `[SECURITY] Verification of WorldEdit dependencies...\n[OK] Core permissions resolved with standard luckperms rule file.\n\n   [ADMIN_CHECK] Key validated.\n   [DOCKER] Container is healthy.`,
             `[ENGINE] Re-building chunks for WorldEdit operation ID #92\n[WORLD] Undo memory buffered size: 4.1MB.\n\n   ▄▄▄▄▄\n   █   █\n   ▀▀▀▀▀\n\n[INFO] Minecraft Spigot Paper thread is running at stable 20.0 TPS.`
           ];
@@ -1114,8 +1116,8 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
               <div className="w-full h-44 bg-neutral-950/80 rounded-lg border border-neutral-900 flex flex-col items-center justify-center text-center p-6 space-y-3.5">
                 <Play className="w-8 h-8 text-indigo-400 cursor-pointer hover:scale-110 transition-transform" onClick={() => setIsPlayingVideo(true)} />
                 <div>
-                  <p className="text-xs text-neutral-300 font-bold">Interaktive Mod-Videovorschau laden</p>
-                  <p className="text-[10px] text-neutral-550 max-w-sm mt-0.5">Startet eine prozedurale Echtzeit-Dokumentation direkt in Kilians Sandbox.</p>
+                  <p className="text-xs text-neutral-300 font-bold">{t("mods.previewTitle", "Interaktive Mod-Videovorschau laden")}</p>
+                  <p className="text-[10px] text-neutral-550 max-w-sm mt-0.5">{t("mods.previewSub", "Startet eine prozedurale Echtzeit-Dokumentation direkt in der Gameserver Labor Sandbox.")}</p>
                 </div>
               </div>
             )}
@@ -1736,7 +1738,7 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
             <span>•</span>
             <span className="flex items-center gap-1.5 border border-indigo-900/50 px-2 py-0.5 rounded bg-indigo-950/25"><Cpu className="w-3 h-3 text-indigo-400" /> API: Live sync</span>
           </div>
-          <span className="text-indigo-450 uppercase">Kilians Spielwiese Workshop Core 2.0-STABLE</span>
+          <span className="text-indigo-450 uppercase">Gameserver Labor Workshop Core 2.0-STABLE</span>
         </div>
 
     </FloatingWindow>

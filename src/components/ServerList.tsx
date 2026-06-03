@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { GameServer, ServerLog } from "../types";
+import { useLanguage } from "../LanguageContext";
 import {
   Play,
   Square,
@@ -47,6 +48,7 @@ export default function ServerList({
   onCreateBackup,
   accentColor = "indigo"
 }: ServerListProps) {
+  const { t } = useLanguage();
   const [activeConsoleServer, setActiveConsoleServer] = useState<GameServer | null>(null);
   const [consoleLogs, setConsoleLogs] = useState<ServerLog[]>([]);
   const [consoleInput, setConsoleInput] = useState("");
@@ -103,6 +105,9 @@ export default function ServerList({
   const [settingsAutoUpdate, setSettingsAutoUpdate] = useState(true);
   const [settingsAutoBackup, setSettingsAutoBackup] = useState(true);
   const [settingsVars, setSettingsVars] = useState<Record<string, string>>({});
+  const [settingsCpuLimit, setSettingsCpuLimit] = useState(100);
+  const [settingsOomRestart, setSettingsOomRestart] = useState(true);
+  const [settingsDiskThrottle, setSettingsDiskThrottle] = useState(50);
 
   const logsEndRef = useRef<HTMLDivElement>(null);
 
@@ -193,7 +198,7 @@ export default function ServerList({
     switch (gameKey) {
       case "minecraft":
         return [
-          { label: "👑 OP Kilian duchschnittlich", cmd: "op Kilian" },
+          { label: "👑 OP Admin", cmd: "op Admin" },
           { label: "☀️ Zeit auf Tag setzen", cmd: "time set day" },
           { label: "🌙 Zeit auf Nacht setzen", cmd: "time set night" },
           { label: "☔ Regen klären (Wetter)", cmd: "weather clear" },
@@ -253,6 +258,9 @@ export default function ServerList({
     setSettingsAutoUpdate(srv.autoUpdate);
     setSettingsAutoBackup(srv.autoBackup);
     setSettingsVars({ ...srv.variables });
+    setSettingsCpuLimit(srv.cpuLimit !== undefined ? srv.cpuLimit : 100);
+    setSettingsOomRestart(srv.oomRestart !== undefined ? srv.oomRestart : true);
+    setSettingsDiskThrottle(srv.diskThrottle !== undefined ? srv.diskThrottle : 50);
   };
 
   const closeSettings = () => {
@@ -271,7 +279,10 @@ export default function ServerList({
       maxPlayers: Number(settingsPlayers),
       autoUpdate: settingsAutoUpdate,
       autoBackup: settingsAutoBackup,
-      variables: settingsVars
+      variables: settingsVars,
+      cpuLimit: Number(settingsCpuLimit),
+      oomRestart: settingsOomRestart,
+      diskThrottle: Number(settingsDiskThrottle)
     });
 
     closeSettings();
@@ -598,8 +609,8 @@ export default function ServerList({
       {activeConsoleServer && (
         <FloatingWindow
           onClose={closeConsole}
-          title={`Echtzeit-Terminal für ${activeConsoleServer.name}`}
-          subtitle="[Kilians Core CLI Container Sync Engine v2.0] • RCON ACTIVE"
+          title={`${t("servers.terminalTitle", "Echtzeit-Terminal für")} ${activeConsoleServer.name}`}
+          subtitle="[Gameserver Labor CLI Container Sync Engine v2.0] • RCON ACTIVE"
           icon={<Terminal className="w-5 h-5 text-indigo-400" />}
           initialWidth={950}
           initialHeight={620}
@@ -611,7 +622,7 @@ export default function ServerList({
             <div className="flex-1 flex flex-col justify-between bg-black/95">
               <div className="flex-1 p-5 overflow-y-auto font-mono text-xs text-neutral-300 space-y-2 select-text scroller">
                 <div className="text-neutral-600 text-xxs border-b border-neutral-900 pb-2 flex justify-between">
-                  <span>[Kilians Core CLI Container Sync Engine v2.0]</span>
+                  <span>[Gameserver Labor CLI Container Sync Engine v2.0]</span>
                   <span>Session: UTC Live</span>
                 </div>
                 
@@ -829,6 +840,74 @@ export default function ServerList({
                   <span className="text-xs font-mono text-neutral-300 w-16 text-right">
                     {(settingsMaxMemory / 1024).toFixed(1)} GB
                   </span>
+                </div>
+              </div>
+
+              {/* Advanced Resource Controls (Hard Limits) */}
+              <div className="space-y-4 pt-3 border-t border-neutral-850">
+                <span className="block text-xxs font-bold uppercase tracking-wider text-indigo-400 font-mono flex items-center gap-1">
+                  <Cpu className="w-3.5 h-3.5" /> HARD LIMITS &amp; RESSOURCEN-STEUERUNG
+                </span>
+
+                {/* CPU Quota slider */}
+                <div>
+                  <label className="block text-xxs font-bold uppercase tracking-wider text-neutral-450 mb-1 flex justify-between">
+                    <span>CPU-Kern-Kontingent (Max. Last)</span>
+                    <span className="text-[#d4af37] text-xs font-mono font-bold">{settingsCpuLimit}% CPU</span>
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="20"
+                      max="100"
+                      step="10"
+                      value={settingsCpuLimit}
+                      onChange={(e) => setSettingsCpuLimit(Number(e.target.value))}
+                      className="flex-1 accent-indigo-554 bg-[#1c1c24] h-1.5 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <span className="text-xs font-mono text-neutral-400 w-16 text-right">
+                      {(settingsCpuLimit / 100).toFixed(1)} Cores
+                    </span>
+                  </div>
+                </div>
+
+                {/* Disk Write Throttle slider */}
+                <div>
+                  <label className="block text-xxs font-bold uppercase tracking-wider text-neutral-450 mb-1 flex justify-between">
+                    <span>Festplatten I/O Drosselung (Write Limit)</span>
+                    <span className="text-[#d4af37] text-xs font-mono font-bold">{settingsDiskThrottle} MB/s</span>
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="10"
+                      max="500"
+                      step="10"
+                      value={settingsDiskThrottle}
+                      onChange={(e) => setSettingsDiskThrottle(Number(e.target.value))}
+                      className="flex-1 accent-indigo-554 bg-[#1c1c24] h-1.5 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <span className="text-xs font-mono text-neutral-400 w-16 text-right">
+                      {settingsDiskThrottle >= 500 ? "UNLIMITIERT" : `${settingsDiskThrottle} MB/s`}
+                    </span>
+                  </div>
+                </div>
+
+                {/* OOM Auto-Restart toggle */}
+                <div className="flex items-center justify-between bg-[#121216] p-3 rounded-lg border border-[#24242a]">
+                  <div>
+                    <p className="text-xs font-bold text-white">OOM Auto-Restart Engine</p>
+                    <p className="text-[10px] text-neutral-500 mt-0.5">Startet Container automatisch neu, falls RAM-Limit überschritten wird.</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settingsOomRestart}
+                      onChange={(e) => setSettingsOomRestart(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-neutral-900 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-neutral-450 after:border-gray-500 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                  </label>
                 </div>
               </div>
 

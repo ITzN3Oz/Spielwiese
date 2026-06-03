@@ -16,7 +16,7 @@ function fetchJson(url: string, headers: Record<string, string> = {}): Promise<a
         hostname: urlObj.hostname,
         path: urlObj.pathname + urlObj.search,
         headers: {
-          "User-Agent": "Kilians-Spielwiese-App/1.0",
+          "User-Agent": "Gameserver-Labor-App/1.0",
           ...headers
         }
       };
@@ -66,13 +66,42 @@ function loadDatabase() {
     servers: [],
     backups: [],
     users: [],
-    logs: []
+    logs: [],
+    cronjobs: [
+      {
+        id: "cron-def-1",
+        name: "Premium Nightly Server Reboot",
+        serverId: "minecraft-1u5fr",
+        serverName: "Minecraft Server",
+        action: "restart",
+        interval: "daily",
+        time: "03:15",
+        active: true
+      },
+      {
+        id: "cron-def-2",
+        name: "Automatisches Backup Intervall",
+        serverId: "minecraft-1u5fr",
+        serverName: "Minecraft Server",
+        action: "backup",
+        interval: "interval_30s",
+        active: false
+      }
+    ],
+    cronjobLogs: []
   };
 
   try {
     if (fs.existsSync(DB_FILE)) {
       const content = fs.readFileSync(DB_FILE, "utf-8");
-      return JSON.parse(content);
+      const parsed = JSON.parse(content);
+      if (!parsed.cronjobs) {
+        parsed.cronjobs = defaultData.cronjobs;
+      }
+      if (!parsed.cronjobLogs) {
+        parsed.cronjobLogs = [];
+      }
+      return parsed;
     } else {
       fs.writeFileSync(DB_FILE, JSON.stringify(defaultData, null, 2), "utf-8");
       return defaultData;
@@ -283,8 +312,43 @@ async function startServer() {
         changed = true;
         const cpuDelta = (Math.random() - 0.5) * 4;
         const ramDelta = (Math.random() - 0.5) * 40;
-        const newCpu = Math.max(2, Math.min(95, Math.round(srv.cpuUsage + cpuDelta)));
-        const newMemory = Math.max(300, Math.min(srv.maxMemory - 100, Math.round(srv.memoryUsage + ramDelta)));
+        
+        const maxCpuLimit = srv.cpuLimit !== undefined ? srv.cpuLimit : 100;
+        let newCpu = Math.max(2, Math.min(maxCpuLimit, Math.round((srv.cpuUsage || 10) + cpuDelta)));
+        
+        let newMemory = Math.round((srv.memoryUsage || Math.round(srv.maxMemory * 0.3)) + ramDelta);
+        if (newMemory < 150) newMemory = 150;
+
+        // Custom simulated memory stress test or random peak that can exceed limits if memory limit is small or on random spike
+        if (newMemory > srv.maxMemory || (Math.random() > 0.99 && newMemory > srv.maxMemory * 0.92)) {
+          const isOomActive = srv.oomRestart !== false; // defaults to true
+          if (isOomActive) {
+            db.logs.push({
+              id: "log-" + Date.now(),
+              serverId: srv.id,
+              timestamp: new Date().toISOString(),
+              type: "warn",
+              message: `[DOCKER] Out-of-Memory limit hit (${newMemory}MB / ${srv.maxMemory}MB). OOM Auto-Restart Engine triggered: restarting container...`
+            });
+            newMemory = Math.round(srv.maxMemory * 0.25);
+            newCpu = 15;
+          } else {
+            db.logs.push({
+              id: "log-" + Date.now(),
+              serverId: srv.id,
+              timestamp: new Date().toISOString(),
+              type: "error",
+              message: `[KILLED] Process out of memory (${newMemory}MB > ${srv.maxMemory}MB). Container killed! OOM-Restart is disabled.`
+            });
+            return {
+              ...srv,
+              status: "stopped" as const,
+              cpuUsage: 0,
+              memoryUsage: 0,
+              activePlayers: 0
+            };
+          }
+        }
         
         return {
           ...srv,
@@ -426,7 +490,10 @@ async function startServer() {
       autoBackup: true,
       variables: variables || {},
       created: new Date().toISOString(),
-      iconUrl: finalIconUrl
+      iconUrl: finalIconUrl,
+      cpuLimit: 100,
+      oomRestart: true,
+      diskThrottle: 250
     };
 
     db.servers.push(newServer);
@@ -473,7 +540,7 @@ async function startServer() {
           serverId: id,
           timestamp: new Date().toISOString(),
           type: "info",
-          message: `[Kilians Spielwiese] Server '${name}' was successfully initialized inside directory ${serverDir}.`
+          message: `[Gameserver Labor] Server '${name}' was successfully initialized inside directory ${serverDir}.`
         });
 
         saveDatabase(db);
@@ -583,7 +650,7 @@ async function startServer() {
   // 6. PUT/Edit Server Configurations
   app.put("/api/servers/:id", (req, res) => {
     const { id } = req.params;
-    const { name, dockerImage, portMapping, maxMemory, autoUpdate, autoBackup, variables, maxPlayers } = req.body;
+    const { name, dockerImage, portMapping, maxMemory, autoUpdate, autoBackup, variables, maxPlayers, cpuLimit, oomRestart, diskThrottle } = req.body;
 
     db = loadDatabase();
     const idx = db.servers.findIndex((s: GameServer) => s.id === id);
@@ -601,6 +668,9 @@ async function startServer() {
     if (autoBackup !== undefined) srv.autoBackup = autoBackup;
     if (variables !== undefined) srv.variables = variables;
     if (maxPlayers !== undefined) srv.maxPlayers = maxPlayers;
+    if (cpuLimit !== undefined) srv.cpuLimit = cpuLimit;
+    if (oomRestart !== undefined) srv.oomRestart = oomRestart;
+    if (diskThrottle !== undefined) srv.diskThrottle = diskThrottle;
 
     db.logs.push({
       id: "log-" + Date.now(),
@@ -697,25 +767,25 @@ async function startServer() {
         seeded = [
           {
             name: "server.properties",
-            content: `# Minecraft server properties\n# Generated by Kilians Spielwiese\ndifficulty=normal\npvp=true\nmax-players=10\nallow-flight=false\nwhite-list=false\nlevel-name=world\nview-distance=10\nmotd=Willkommen auf Kilians Spielwiese Minecraft-Server!\nonline-mode=true\n`
+            content: `# Minecraft server properties\n# Generated by Gameserver Labor\ndifficulty=normal\npvp=true\nmax-players=10\nallow-flight=false\nwhite-list=false\nlevel-name=world\nview-distance=10\nmotd=Willkommen auf Gameserver Labor Minecraft-Server!\nonline-mode=true\n`
           },
           {
             name: "ops.json",
-            content: `[\n  {\n    "uuid": "d82bd52f-1049-411c-a0e2-e7b36f1c7132",\n    "name": "Kilian",\n    "level": 4,\n    "bypassesPlayerLimit": true\n  }\n]`
+            content: `[\n  {\n    "uuid": "d82bd52f-1049-411c-a0e2-e7b36f1c7132",\n    "name": "Operator",\n    "level": 4,\n    "bypassesPlayerLimit": true\n  }\n]`
           }
         ];
       } else if (gameType === "dayz") {
         seeded = [
           {
             name: "serverDZ.cfg",
-            content: `// serverDZ.cfg - DayZ server configurations\nhostname = "Kilians Spielwiese DayZ Server";\npassword = "";\npasswordAdmin = "DayZAdminPass123";\nmaxPlayers = 40;\nforceSameBuild = 1;\nclass Missions {\n  class DayZ {\n    template="dayzOffline.chernarusplus";\n  };\n};`
+            content: `// serverDZ.cfg - DayZ server configurations\nhostname = "Gameserver Labor DayZ Server";\npassword = "";\npasswordAdmin = "DayZAdminPass123";\nmaxPlayers = 40;\nforceSameBuild = 1;\nclass Missions {\n  class DayZ {\n    template="dayzOffline.chernarusplus";\n  };\n};`
           }
         ];
       } else if (gameType === "cs2") {
         seeded = [
           {
             name: "server.cfg",
-            content: `// CS2 Dedicated Server Config\nhostname "Kilians Community Match Server"\nrcon_password "SuperSecurePassword123"\nsv_cheats 0\nsv_lan 0\nmp_roundtime 1.92\nmp_maxrounds 24\nmp_startmoney 800\n`
+            content: `// CS2 Dedicated Server Config\nhostname "Gameserver Labor Community Match Server"\nrcon_password "SuperSecurePassword123"\nsv_cheats 0\nsv_lan 0\nmp_roundtime 1.92\nmp_maxrounds 24\nmp_startmoney 800\n`
           }
         ];
       } else {
@@ -873,7 +943,7 @@ async function startServer() {
         const user = command.substring(3);
         responseText = `Permissions updated: ${user} is now a Server Operator.`;
       } else if (cmdClean === "list") {
-        responseText = "Active players connected: Steve, Alex, Kilian";
+        responseText = "Active players connected: Steve, Alex, Operator";
       } else if (cmdClean === "status") {
         responseText = "Performance Profile: TPS 20.0, Chunk Cache 154, Threads active.";
       } else {
@@ -1145,7 +1215,7 @@ async function startServer() {
             iconUrl: `https://cdn.cloudflare.steamstatic.com/steam/apps/${item.id}/header.jpg`,
             defaultVariables: {
               STEAM_APP_ID: String(item.id),
-              SERVER_NAME: `Kilians Spielwiese ${item.name} Server`,
+              SERVER_NAME: `Gameserver Labor ${item.name} Server`,
               GAME_PORT: String(port),
               EULA: "TRUE"
             }
@@ -1176,7 +1246,7 @@ async function startServer() {
             defaultVariables: {
               GITHUB_REPO: item.full_name,
               GITHUB_DOCKER_IMAGE: `${ownerName}/${item.name}:latest`,
-              SERVER_NAME: `Kilians Spielwiese ${item.name} Server`,
+              SERVER_NAME: `Gameserver Labor ${item.name} Server`,
               GAME_PORT: String(port),
               EULA: "TRUE"
             }
@@ -1219,7 +1289,7 @@ async function startServer() {
             recommendedRam: item.repo_name.includes("minecraft") ? 4096 : 8192,
             iconUrl: "https://upload.wikimedia.org/wikipedia/commons/4/4e/Docker_logo_sans_text.svg",
             defaultVariables: {
-              SERVER_NAME: `Kilians Spielwiese ${item.repo_name.split("/")[1] || item.repo_name} Server`,
+              SERVER_NAME: `Gameserver Labor ${item.repo_name.split("/")[1] || item.repo_name} Server`,
               DOCKER_IMAGE: `${item.repo_name}:latest`,
               GAME_PORT: String(portVal),
               EULA: "TRUE"
@@ -1416,6 +1486,221 @@ async function startServer() {
     saveDatabase(db);
     res.json({ success: true, message: "Benutzerkonto wurde aus dem System entfernt" });
   });
+
+  // 18. GET scheduler jobs
+  app.get("/api/scheduler/jobs", (req, res) => {
+    db = loadDatabase();
+    res.json(db.cronjobs || []);
+  });
+
+  // 19. POST scheduler job create
+  app.post("/api/scheduler/jobs", (req, res) => {
+    const { name, serverId, serverName, action, command, interval, time } = req.body;
+    db = loadDatabase();
+    
+    const id = "cron-" + Math.random().toString(36).substring(2, 7);
+    const newJob = {
+      id,
+      name,
+      serverId,
+      serverName,
+      action,
+      command,
+      interval,
+      time,
+      active: true,
+      lastRun: undefined
+    };
+    
+    if (!db.cronjobs) db.cronjobs = [];
+    db.cronjobs.push(newJob);
+    saveDatabase(db);
+
+    db.logs.push({
+      id: "log-" + Date.now(),
+      serverId,
+      timestamp: new Date().toISOString(),
+      type: "info",
+      message: `[SCHEDULER / CRON] Neue geplante Aufgabe '${name}' registriert.`
+    });
+
+    res.status(201).json(newJob);
+  });
+
+  // 20. PUT Toggle / update scheduler job
+  app.put("/api/scheduler/jobs/:id", (req, res) => {
+    const { id } = req.params;
+    const { active } = req.body;
+    db = loadDatabase();
+    
+    if (!db.cronjobs) db.cronjobs = [];
+    const job = db.cronjobs.find((j: any) => j.id === id);
+    if (!job) {
+      return res.status(404).json({ error: "Aufgabe nicht gefunden" });
+    }
+    
+    if (active !== undefined) job.active = active;
+    saveDatabase(db);
+    res.json(job);
+  });
+
+  // 21. DELETE scheduler job
+  app.delete("/api/scheduler/jobs/:id", (req, res) => {
+    const { id } = req.params;
+    db = loadDatabase();
+    if (!db.cronjobs) db.cronjobs = [];
+    db.cronjobs = db.cronjobs.filter((j: any) => j.id !== id);
+    saveDatabase(db);
+    res.json({ success: true });
+  });
+
+  // 22. GET scheduler logs
+  app.get("/api/scheduler/logs", (req, res) => {
+    db = loadDatabase();
+    res.json(db.cronjobLogs || []);
+  });
+
+  // 23. POST Run job now (manual trigger)
+  app.post("/api/scheduler/jobs/:id/run", (req, res) => {
+    const { id } = req.params;
+    db = loadDatabase();
+    if (!db.cronjobs) db.cronjobs = [];
+    const job = db.cronjobs.find((j: any) => j.id === id);
+    if (!job) {
+      return res.status(404).json({ error: "Aufgabe nicht gefunden" });
+    }
+    
+    executeJob(job);
+    res.json({ success: true, message: "Manuell gestartet" });
+  });
+
+  function executeJob(job: any) {
+    db = loadDatabase();
+    const server = db.servers.find((s: any) => s.id === job.serverId);
+    if (!server) {
+      logCronRun(job, "error", `Ziel-Server '${job.serverName}' existiert nicht mehr.`);
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    
+    if (job.action === "backup") {
+      const backupId = "backup-" + Math.random().toString(36).substring(2, 7);
+      const newBackup = {
+        id: backupId,
+        serverId: server.id,
+        serverName: server.name,
+        name: `${job.name} (Auto-Backup)`,
+        timestamp,
+        size: Math.random() > 0.5 ? "452 MB" : "1.2 GB",
+        status: "success",
+        fileSize: Math.round(200 + Math.random() * 800)
+      };
+      if (!db.backups) db.backups = [];
+      db.backups.push(newBackup);
+      logCronRun(job, "success", `Automatischer Snapshot erfolgreich angelegt. Backup ID: ${backupId}`);
+      
+      db.logs.push({
+        id: "log-" + Date.now(),
+        serverId: server.id,
+        timestamp,
+        type: "info",
+        message: `[SCHEDULER / CRON] Automatisches geplantes GZIP Backup '${job.name}' erfolgreich abgeschlossen.`
+      });
+    } else if (job.action === "restart") {
+      db.logs.push({
+        id: "log-" + Date.now(),
+        serverId: server.id,
+        timestamp,
+        type: "info",
+        message: `[SCHEDULER / CRON] Geplanter Container-Neustart eingeleitet...`
+      });
+      server.status = "stopped";
+      setTimeout(() => {
+        db = loadDatabase();
+        const recheckServer = db.servers.find((s: any) => s.id === server.id);
+        if (recheckServer) {
+          recheckServer.status = "running";
+          recheckServer.cpuUsage = 18;
+          recheckServer.memoryUsage = Math.round(recheckServer.maxMemory * 0.28);
+          db.logs.push({
+            id: "log-" + Date.now(),
+            serverId: recheckServer.id,
+            timestamp: new Date().toISOString(),
+            type: "info",
+            message: `[SCHEDULER / CRON] Container erfolgreich hochgefahren.`
+          });
+          saveDatabase(db);
+        }
+      }, 3000);
+      logCronRun(job, "success", `Automatischer Container-Neustart-Prozess wurde erfolgreich injiziert.`);
+    } else if (job.action === "command") {
+      db.logs.push({
+        id: "log-" + Date.now(),
+        serverId: server.id,
+        timestamp,
+        type: "info",
+        message: `[RCON COMMAND] Geplanter Konsolenbefehl empfangen: "${job.command || ""}"`
+      });
+      logCronRun(job, "success", `RCON Konsolen-Befehl erfolgreich abgesetzt: "${job.command || ""}"`);
+    }
+
+    // Update lastRun timestamp in db.cronjobs
+    const j = db.cronjobs.find((item: any) => item.id === job.id);
+    if (j) {
+      j.lastRun = timestamp;
+    }
+    saveDatabase(db);
+  }
+
+  function logCronRun(job: any, status: "success" | "warn" | "error", message: string) {
+    if (!db.cronjobLogs) db.cronjobLogs = [];
+    db.cronjobLogs.push({
+      id: "run-" + Date.now() + Math.random().toString(36).substring(3, 7),
+      jobId: job.id,
+      jobName: job.name,
+      serverId: job.serverId,
+      serverName: job.serverName,
+      timestamp: new Date().toISOString(),
+      status,
+      message
+    });
+    if (db.cronjobLogs.length > 60) {
+      db.cronjobLogs.shift();
+    }
+  }
+
+  // Automated live scheduler dispatcher tick (every 20 seconds)
+  setInterval(() => {
+    db = loadDatabase();
+    if (!db.cronjobs) db.cronjobs = [];
+    const activeJobs = db.cronjobs.filter((j: any) => j.active);
+
+    activeJobs.forEach((job: any) => {
+      let runNow = false;
+
+      if (job.interval === "interval_30s") {
+        const last = job.lastRun ? new Date(job.lastRun).getTime() : 0;
+        if (Date.now() - last >= 28000) {
+          runNow = true;
+        }
+      } else if (job.interval === "hourly") {
+        const last = job.lastRun ? new Date(job.lastRun).getTime() : 0;
+        if (Date.now() - last >= 3600000) {
+          runNow = true;
+        }
+      } else {
+        // Randomly simulate other daily/weekly tasks running to show off alive UI
+        if (!job.lastRun && Math.random() > 0.96) {
+          runNow = true;
+        }
+      }
+
+      if (runNow) {
+        executeJob(job);
+      }
+    });
+  }, 15000);
 
   // Serve static assets in production or mount Vite middleware in development
   if (process.env.NODE_ENV !== "production") {

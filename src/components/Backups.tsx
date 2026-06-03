@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Backup, GameServer } from "../types";
+import { useLanguage } from "../LanguageContext";
 import {
   ShieldAlert,
   Archive,
@@ -30,6 +31,7 @@ export default function Backups({
   onDeleteBackup,
   isProcessing
 }: BackupsProps) {
+  const { t } = useLanguage();
   const [selectedServer, setSelectedServer] = useState("");
   const [backupName, setBackupName] = useState("");
   const [restoredId, setRestoredId] = useState<string | null>(null);
@@ -126,10 +128,10 @@ export default function Backups({
           <div className="space-y-4">
             <h4 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
               <Zap className="w-4.5 h-4.5 text-amber-500" />
-              Automatisierte Notfallwiederherstellung & Backup-Strategie
+              {t("backups.strategyTitle", "Automatisierte Notfallwiederherstellung & Backup-Strategie")}
             </h4>
             <p className="text-xs text-neutral-400 leading-relaxed">
-              Dank des integrierten Docker-Volume-Mappings speichert Kilians Spielwiese die Welten- und Nutzerdaten völlig isoliert vom Spielcontainer ab. Bei jedem automatischen nächtlichen Sicherungsintervall (falls in den Servereinstellungen aktiviert) führt Kilians Spielwiese folgende automatisierte Schritte aus:
+              {t("backups.strategyDesc", "Dank des integrierten Docker-Volume-Mappings speichert Gameserver Labor die Welten- und Nutzerdaten völlig isoliert vom Spielcontainer ab. Bei jedem automatischen nächtlichen Sicherungsintervall (falls in den Servereinstellungen aktiviert) führt Gameserver Labor folgende automatisierte Schritte aus:")}
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
