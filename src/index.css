@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .scroller::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scroller::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scroller::-webkit-scrollbar-thumb {
+    background: #24242d;
+    border-radius: 99px;
+  }
+  .scroller::-webkit-scrollbar-thumb:hover {
+    background: #3f3f4e;
+  }
+}
+
+/* Cosmic Nebula Background animations */
+@keyframes fluid-glow-1 {
+  0%, 100% { transform: translate(0px, 0px) scale(1); }
+  33% { transform: translate(40px, -50px) scale(1.15); }
+  66% { transform: translate(-30px, 20px) scale(0.9); }
+}
+@keyframes fluid-glow-2 {
+  0%, 100% { transform: translate(0px, 0px) scale(1); }
+  50% { transform: translate(-50px, 40px) scale(1.18); }
+}
+
+.animate-glow-1 {
+  animation: fluid-glow-1 20s infinite ease-in-out;
+}
+.animate-glow-2 {
+  animation: fluid-glow-2 24s infinite ease-in-out;
+}
+
+/* Cyber Blueprint Grid */
+.bg-grid-cyber {
+  background-size: 44px 44px;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.012) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.012) 1px, transparent 1px);
+}
+
+/* Scanline Overlay */
+.scanlines-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    rgba(18, 16, 16, 0) 50%, 
+    rgba(0, 0, 0, 0.12) 50%
+  );
+  background-size: 100% 4px;
+  z-index: 999;
+}
