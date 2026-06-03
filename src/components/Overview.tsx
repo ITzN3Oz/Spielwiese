@@ -239,7 +239,7 @@ export default function Overview({ stats, servers, onToggleServer, accentColor =
               activeServers.map((srv) => (
                 <div key={srv.id} className="py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 first:pt-0 last:pb-0">
                   <div className="flex items-center gap-3">
-                    <GameIcon game={srv.game} className="w-10 h-10 flex-shrink-0" />
+                    <GameIcon game={srv.game} className="w-10 h-10 flex-shrink-0" iconUrl={srv.iconUrl} />
                     <div>
                       <h4 className="font-semibold text-white text-sm">{srv.name}</h4>
                       <div className="flex items-center gap-2 mt-1 text-xs text-neutral-450 font-mono">

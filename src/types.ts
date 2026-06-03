@@ -18,6 +18,7 @@ export interface GameServer {
   autoBackup: boolean;
   variables: Record<string, string>;
   created: string;
+  iconUrl?: string;
 }
 
 export interface Backup {
@@ -70,4 +71,5 @@ export interface GameTemplate {
   description: string;
   recommendedRam: number; // MB
   defaultVariables: Record<string, string>;
+  iconUrl?: string;
 }

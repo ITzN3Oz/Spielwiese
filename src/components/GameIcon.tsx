@@ -4,9 +4,10 @@ interface GameIconProps {
   game: string;
   className?: string;
   fallbackText?: string;
+  iconUrl?: string;
 }
 
-export default function GameIcon({ game, className = "w-10 h-10", fallbackText }: GameIconProps) {
+export default function GameIcon({ game, className = "w-10 h-10", fallbackText, iconUrl }: GameIconProps) {
   const normKey = game.toLowerCase().trim();
   const [hasError, setHasError] = useState(false);
 
@@ -25,12 +26,19 @@ export default function GameIcon({ game, className = "w-10 h-10", fallbackText }
     terraria: "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/105600/header.jpg",
   };
 
-  // Try parsing keys containing strings
-  let matchedUrl = "";
-  for (const [key, url] of Object.entries(gameImageMap)) {
-    if (normKey.includes(key)) {
-      matchedUrl = url;
-      break;
+  // Try using the premium dynamic iconUrl if available
+  let matchedUrl = iconUrl || "";
+  if (!matchedUrl && (game.startsWith("http://") || game.startsWith("https://"))) {
+    matchedUrl = game;
+  }
+
+  // Fallback to standard local game keys
+  if (!matchedUrl) {
+    for (const [key, url] of Object.entries(gameImageMap)) {
+      if (normKey.includes(key)) {
+        matchedUrl = url;
+        break;
+      }
     }
   }
 

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { GameTemplate } from "../types";
 import { Server, Cpu, Layers, HardDrive, Plus, Info, Globe, Sparkles, Search, Command } from "lucide-react";
 import GameIcon from "./GameIcon";
@@ -11,6 +11,7 @@ interface ServerCatalogProps {
     portMapping: string;
     recommendedRam: number;
     variables: Record<string, string>;
+    iconUrl?: string;
   }) => void;
   isInstalling: boolean;
 }
@@ -171,6 +172,8 @@ export const GAME_TEMPLATES: GameTemplate[] = [
 
 export default function ServerCatalog({ onInstall, isInstalling }: ServerCatalogProps) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<GameTemplate[]>([]);
+  const [isLoadingSearch, setIsLoadingSearch] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<GameTemplate | null>(null);
   const [customMode, setCustomMode] = useState(false);
 
@@ -188,11 +191,38 @@ export default function ServerCatalog({ onInstall, isInstalling }: ServerCatalog
   const [templateVars, setTemplateVars] = useState<Record<string, string>>({});
 
   // Initialize with first template
-  React.useEffect(() => {
+  useEffect(() => {
     if (!selectedTemplate && GAME_TEMPLATES[0]) {
       handleSelectTemplate(GAME_TEMPLATES[0]);
     }
   }, []);
+
+  // Live premium web discovery fetcher
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (query.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+
+    setIsLoadingSearch(true);
+    const delayDebounce = setTimeout(() => {
+      fetch(`/api/catalog/search?query=${encodeURIComponent(query)}`)
+        .then((res) => {
+          if (!res.ok) throw new Error("Search network error");
+          return res.json();
+        })
+        .then((data) => {
+          if (Array.isArray(data)) {
+            setSearchResults(data);
+          }
+        })
+        .catch((err) => console.error("Dynamic web catalogue lookup failed:", err))
+        .finally(() => setIsLoadingSearch(false));
+    }, 400);
+
+    return () => clearTimeout(delayDebounce);
+  }, [searchQuery]);
 
   // When a template is clicked, synchronize defaults
   const handleSelectTemplate = (tpl: GameTemplate) => {
@@ -251,7 +281,8 @@ export default function ServerCatalog({ onInstall, isInstalling }: ServerCatalog
         dockerImage: selectedTemplate.defaultImage,
         portMapping: serverPort || selectedTemplate.defaultPort,
         recommendedRam: serverRam || selectedTemplate.recommendedRam,
-        variables: templateVars
+        variables: templateVars,
+        iconUrl: selectedTemplate.iconUrl
       });
     }
   };
@@ -345,7 +376,7 @@ export default function ServerCatalog({ onInstall, isInstalling }: ServerCatalog
         </div>
 
         {/* Templates cards list grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[460px] overflow-y-auto pr-1 scroller">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 max-h-[520px] overflow-y-auto pr-1 scroller">
           
           {/* Dynamic Fallback Card to install "ANY" game directly which was typed in search field */}
           {showDynamicFallback && (
@@ -364,60 +395,153 @@ export default function ServerCatalog({ onInstall, isInstalling }: ServerCatalog
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <h4 className="font-extrabold text-white text-xs tracking-wider uppercase truncate">Instanziere '{searchQuery}'</h4>
-                  <span className="bg-indigo-950/40 text-indigo-400 font-mono text-[8px] border border-indigo-900/30 px-1.5 py-0.5 rounded font-bold">ONLINE DOCKED</span>
+                  <span className="bg-indigo-950/40 text-indigo-400 font-mono text-[8px] border border-indigo-900/30 px-1.5 py-0.5 rounded font-bold">GENERIC STEAMCMD</span>
                 </div>
-                <p className="text-neutral-450 mt-1 text-[11px] leading-relaxed truncate">
-                  Kein vorgefertigtes Template? Klicken Sie hier, um ein automatisiertes Linux-Container Profil für <strong>{searchQuery}</strong> zu generieren.
+                <p className="text-neutral-450 mt-1 text-[11px] leading-relaxed">
+                  Keine Direkt-Treffer? Klicken Sie hier, um ein automatisiertes SteamCMD-Profil für <strong>{searchQuery}</strong> zu generieren.
                 </p>
               </div>
               <Plus className="w-5 h-5 text-indigo-400 flex-shrink-0" />
             </button>
           )}
 
-          {filtered.length === 0 ? (
+          {/* SECTION 1: Local Templates (Schnell-Pakete) */}
+          {filtered.length > 0 && (
+            <div className="col-span-1 sm:col-span-2 space-y-3">
+              <div className="flex items-center gap-1.5 border-b border-neutral-800/60 pb-1.5">
+                <Layers className="w-3.5 h-3.5 text-neutral-500" />
+                <h5 className="text-[10px] uppercase font-bold tracking-wider text-neutral-400">
+                  Vorgefertigte Kern-Templates (Schnellinstallationspakete)
+                </h5>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {filtered.map((tpl) => {
+                  const isSelected = !customMode && selectedTemplate?.gameKey === tpl.gameKey;
+                  return (
+                    <button
+                      key={tpl.gameKey}
+                      onClick={() => handleSelectTemplate(tpl)}
+                      type="button"
+                      className={`text-left p-4 rounded-xl border transition-all text-neutral-200 cursor-pointer flex flex-col justify-between ${
+                        isSelected
+                          ? "bg-[#1c1c24] border-indigo-500/50 shadow-[0_0_15px_-3px_rgba(99,102,241,0.2)]"
+                          : "bg-[#121216] border-[#24242a] hover:border-neutral-750 hover:bg-[#16161b]"
+                      }`}
+                    >
+                      <div>
+                        <div className="flex justify-between items-start">
+                          <GameIcon game={tpl.gameKey} className="w-9 h-9 flex-shrink-0" iconUrl={tpl.iconUrl} />
+                          <span className="text-[9px] font-mono text-neutral-500 bg-neutral-950/60 px-1.5 py-0.5 rounded border border-neutral-900 font-bold tracking-wider">
+                            TEMPLATE
+                          </span>
+                        </div>
+                        <h4 className="font-bold text-white mt-3 text-sm tracking-wide">{tpl.name}</h4>
+                        <p className="text-neutral-450 text-xs mt-1.5 leading-relaxed line-clamp-2">
+                          {tpl.description}
+                        </p>
+                      </div>
+
+                      <div className="flex gap-4 mt-4 pt-3 border-t border-neutral-850 text-xxs font-mono text-neutral-550">
+                        <span className="flex items-center gap-1">
+                          <Cpu className="w-3 h-3 text-indigo-400" /> {Math.round(tpl.recommendedRam / 1024)}GB Min
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Globe className="w-3 h-3 text-indigo-400" /> Port {tpl.defaultPort.split(":")[0]}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* SECTION 2: Dynamic Web API Search results via Steam, GitHub & Docker Hub */}
+          {searchQuery.trim().length >= 2 && (
+            <div className="col-span-1 sm:col-span-2 space-y-3 pt-2">
+              <div className="flex items-center gap-1.5 border-b border-neutral-800/60 pb-1.5 font-sans">
+                <Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
+                <h5 className="text-[10px] uppercase font-bold tracking-wider text-indigo-400">
+                  Gefundene Installations-Pakete im Web (Live Steam, GitHub, Docker Hub)
+                </h5>
+              </div>
+
+              {isLoadingSearch ? (
+                <div className="text-center py-10 bg-[#121216]/20 rounded-xl border border-[#24242a]/60">
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-indigo-500 mx-auto mb-2"></div>
+                  <p className="text-[11px] text-neutral-500">Suche Web-Paketquellen auf Steam, GitHub & DockerHub...</p>
+                </div>
+              ) : searchResults.length === 0 ? (
+                <div className="text-center py-8 bg-[#121216]/10 rounded-xl border border-neutral-850/40">
+                  <p className="text-neutral-550 text-xs font-sans">Keine Web-Dienste liefern Treffer für "{searchQuery}". Verwenden Sie oben das manuelle Setup.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {searchResults.map((tpl) => {
+                    const isSelected = !customMode && selectedTemplate?.gameKey === tpl.gameKey;
+                    const isSteam = tpl.gameKey.startsWith("steam-");
+                    const isGitHub = tpl.gameKey.startsWith("github-");
+                    const isDockerHub = tpl.gameKey.startsWith("dockerhub-");
+
+                    const badgeText = isSteam ? "STEAM DOCKER" : isGitHub ? "GITHUB REPO" : isDockerHub ? "DOCKER HUB" : "WEB DOCKED";
+                    const badgeStyle = isSteam 
+                      ? "text-indigo-400 bg-indigo-950/40 border-indigo-900/30"
+                      : isGitHub
+                        ? "text-emerald-400 bg-emerald-950/40 border-emerald-900/30"
+                        : "text-sky-400 bg-sky-950/40 border-sky-900/30";
+
+                    return (
+                      <button
+                        key={tpl.gameKey}
+                        onClick={() => handleSelectTemplate(tpl)}
+                        type="button"
+                        className={`text-left p-4 rounded-xl border transition-all text-neutral-200 cursor-pointer flex flex-col justify-between ${
+                          isSelected
+                            ? "bg-[#1c1c24] border-indigo-505/50 shadow-[0_0_15px_-3px_rgba(99,102,241,0.2)]"
+                            : "bg-[#121216] border-[#24242a] hover:border-neutral-750 hover:bg-[#16161b]"
+                        }`}
+                      >
+                        <div>
+                          <div className="flex justify-between items-start gap-4">
+                            <span className={`text-[8px] font-mono px-1.5 py-0.5 rounded border font-bold tracking-wider uppercase ${badgeStyle}`}>
+                              {badgeText}
+                            </span>
+                            <div className="w-10 h-10 overflow-hidden rounded bg-neutral-900 flex-shrink-0 border border-neutral-800 flex items-center justify-center p-1">
+                              {tpl.iconUrl ? (
+                                <img src={tpl.iconUrl} alt="logo" referrerPolicy="no-referrer" className="w-full h-full object-contain" />
+                              ) : (
+                                <span className="text-lg">{tpl.icon || "🎲"}</span>
+                              )}
+                            </div>
+                          </div>
+                          <h4 className="font-bold text-white mt-1.5 text-xs tracking-wide truncate max-w-full font-sans">{tpl.name}</h4>
+                          <p className="text-neutral-400 text-[11px] mt-1.5 leading-relaxed line-clamp-3 font-sans">
+                            {tpl.description}
+                          </p>
+                        </div>
+
+                        <div className="flex gap-4 mt-4 pt-3 border-t border-neutral-855 text-xxs font-mono text-neutral-550">
+                          <span className="flex items-center gap-1">
+                            <Cpu className="w-3 h-3 text-indigo-400" /> {Math.round(tpl.recommendedRam / 1024)}GB Min
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Globe className="w-3 h-3 text-indigo-400" /> Port {tpl.defaultPort.split(":")[0]}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {filtered.length === 0 && searchResults.length === 0 && !isLoadingSearch && (
             <div className="col-span-1 sm:col-span-2 text-center py-12 bg-neutral-950/20 rounded-xl border border-neutral-850">
               <Command className="w-8 h-8 text-neutral-700 mx-auto mb-2" />
               <p className="text-xs text-neutral-500">Keine Minecraft- oder Presets-Treffer filtriert für '{searchQuery}'.</p>
               <p className="text-[10px] text-neutral-600 mt-1.5">Geben Sie oben einfach den Wunschnamen ein, um die dynamische Generierung zu nutzen!</p>
             </div>
-          ) : (
-            filtered.map((tpl) => {
-              const isSelected = !customMode && selectedTemplate?.gameKey === tpl.gameKey;
-              return (
-                <button
-                  key={tpl.gameKey}
-                  onClick={() => handleSelectTemplate(tpl)}
-                  type="button"
-                  className={`text-left p-4 rounded-xl border transition-all text-neutral-200 cursor-pointer flex flex-col justify-between ${
-                    isSelected
-                      ? "bg-[#1c1c24] border-indigo-500/50 shadow-[0_0_15px_-3px_rgba(99,102,241,0.2)]"
-                      : "bg-[#121216] border-[#24242a] hover:border-neutral-750 hover:bg-[#16161b]"
-                  }`}
-                >
-                  <div>
-                    <div className="flex justify-between items-start">
-                      <GameIcon game={tpl.gameKey} className="w-9 h-9 flex-shrink-0" />
-                      <span className="text-[9px] font-mono text-neutral-500 bg-neutral-950/60 px-1.5 py-0.5 rounded border border-neutral-900 font-bold tracking-wider">
-                        STEAM/DOCKER
-                      </span>
-                    </div>
-                    <h4 className="font-bold text-white mt-3 text-sm tracking-wide">{tpl.name}</h4>
-                    <p className="text-neutral-450 text-xs mt-1.5 leading-relaxed line-clamp-2">
-                      {tpl.description}
-                    </p>
-                  </div>
-
-                  <div className="flex gap-4 mt-4 pt-3 border-t border-neutral-850 text-xxs font-mono text-neutral-550">
-                    <span className="flex items-center gap-1">
-                      <Cpu className="w-3 h-3 text-indigo-400" /> {Math.round(tpl.recommendedRam / 1024)}GB Min
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Globe className="w-3 h-3 text-indigo-400" /> Port {tpl.defaultPort.split(":")[0]}
-                    </span>
-                  </div>
-                </button>
-              );
-            })
           )}
         </div>
 

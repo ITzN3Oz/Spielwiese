@@ -443,6 +443,8 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
   const [installingModId, setInstallingModId] = useState<string | null>(null);
   const [installStep, setInstallStep] = useState("");
   const [installProgress, setInstallProgress] = useState(0);
+  const [installedModIds, setInstalledModIds] = useState<string[]>([]);
+  const [isLoadingLiveMods, setIsLoadingLiveMods] = useState(false);
 
   // Simulated Video Player status
   const [isPlayingVideo, setIsPlayingVideo] = useState(false);
@@ -492,6 +494,8 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
       const resMods = await fetch(`/api/servers/${server.id}/mods`);
       if (resMods.ok) {
         const installedModsIds: string[] = await resMods.json();
+        setInstalledModIds(installedModsIds);
+
         const baseMods = PRESET_MODS_RICH[server.game] || PRESET_MODS_RICH["minecraft"]; // Fallback to MC mods
 
         const initializedMods = baseMods.map((bm) => ({
@@ -499,9 +503,12 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
           installed: installedModsIds.includes(bm.id)
         })) as ServerMod[];
 
-        setModsList(initializedMods);
-        if (initializedMods.length > 0 && !selectedMod) {
-          handleSelectMod(initializedMods[0]);
+        // Only overwrite local list if search query is empty
+        if (!modSearch.trim()) {
+          setModsList(initializedMods);
+          if (initializedMods.length > 0 && !selectedMod) {
+            handleSelectMod(initializedMods[0]);
+          }
         }
       }
     } catch (err) {
@@ -515,74 +522,65 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
     setIsPlayingVideo(false);
   };
 
-  const handleSearchMods = () => {
-    const baseMods = PRESET_MODS_RICH[server.game] || PRESET_MODS_RICH["minecraft"];
+  // Dynamic live search for Mods via Modrinth / GitHub with debounce support
+  useEffect(() => {
     const query = modSearch.toLowerCase().trim();
+    const baseMods = PRESET_MODS_RICH[server.game] || PRESET_MODS_RICH["minecraft"];
 
     if (!query) {
-      fetchInstalledModsAndFiles();
+      const initialized = baseMods.map((bm) => ({
+        ...bm,
+        installed: installedModIds.includes(bm.id)
+      })) as ServerMod[];
+      setModsList(initialized);
       return;
     }
 
-    const filtered = baseMods.filter(
+    const filteredLocal = baseMods.filter(
       (m) => m.name.toLowerCase().includes(query) || m.description.toLowerCase().includes(query)
-    );
+    ).map((bm) => ({
+      ...bm,
+      installed: installedModIds.includes(bm.id)
+    })) as ServerMod[];
 
-    const hasPerfectMatch = filtered.some((m) => m.name.toLowerCase() === query);
+    setIsLoadingLiveMods(true);
 
-    const results = filtered.map((bm) => {
-      const isInst = filesList.some(f => f.name.toLowerCase().includes(bm.id));
-      return { ...bm, installed: isInst };
-    }) as ServerMod[];
+    const delayDebounce = setTimeout(() => {
+      fetch(`/api/mods/search?game=${encodeURIComponent(server.game)}&query=${encodeURIComponent(query)}`)
+        .then((res) => {
+          if (!res.ok) throw new Error("Search mods network error");
+          return res.json();
+        })
+        .then((data) => {
+          if (Array.isArray(data)) {
+            const externalResults = data.map((item) => ({
+              ...item,
+              installed: installedModIds.includes(item.id)
+            })) as ServerMod[];
 
-    // Support searching ANY arbitrary game mod dynamically
-    if (!hasPerfectMatch && query.length > 1) {
-      const capitalizedQuery = query.charAt(0).toUpperCase() + query.slice(1);
-      const dynamicMod: ServerMod = {
-        id: `steam-${query.replace(/\s+/g, "-")}`,
-        name: `${capitalizedQuery} Expansion Patch`,
-        version: "2.4.0-release",
-        author: "WorkshopCommunity_Dev",
-        downloads: "6.2 K",
-        description: `Individuell geladene Workshop-Komponente '${capitalizedQuery}' von dem Community-Hub. Komplett sandboxed und volumensicher.`,
-        longDescription: `Diese Drittanbieter-Erweiterung für ${server.name} wurde direkt über das SteamCMD / Curse Public Repository ermittelt. Das Paket beinhaltet binäre Konfigurationsdateien, automatische Logging-Anbindung sowie optimierte Container-Pfade.`,
-        imageBg: "from-indigo-900 via-[#121216] to-[#0c0c0d]",
-        videoType: "custom",
-        origin: "Steam Workshop",
-        rating: 4.5,
-        fileSize: "18.2 MB",
-        dependencies: [],
-        defaultConfigs: {
-          "enabled": "true",
-          "update-on-startup": "true",
-          "debug-logs": "false",
-          "intensity-modifier": "1.0"
-        },
-        previewImages: [
-          "https://images.unsplash.com/photo-1614064641938-3bbee52942c7?w=600&auto=format&fit=crop&q=60",
-          "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=600&auto=format&fit=crop&q=60"
-        ],
-        detailedFeatures: [
-          "Dynamische Einbindung über SteamCMD / CurseForge.",
-          "Voll integrierte Live-Protokollierung im Host-Log.",
-          "Verbindet Container-Dateischnittstellen nahtlos."
-        ],
-        verificationScore: 82,
-        trustedHub: false,
-        installed: false
-      };
-      results.push(dynamicMod);
-    }
+            // Merge local & external without duplicates
+            const merged = [...filteredLocal];
+            externalResults.forEach((ext) => {
+              if (!merged.some((m) => m.id === ext.id)) {
+                merged.push(ext);
+              }
+            });
 
-    setModsList(results);
-    if (results.length > 0) {
-      handleSelectMod(results[0]);
-    }
-  };
+            setModsList(merged);
+            if (merged.length > 0 && (!selectedMod || !merged.some((m) => m.id === selectedMod.id))) {
+              handleSelectMod(merged[0]);
+            }
+          }
+        })
+        .catch((err) => {
+          console.error("Dynamic web mods look up failed:", err);
+          setModsList(filteredLocal);
+        })
+        .finally(() => setIsLoadingLiveMods(false));
+    }, 400);
 
-  useEffect(() => {
-    handleSearchMods();
-  }, [modSearch]);
+    return () => clearTimeout(delayDebounce);
+  }, [modSearch, installedModIds, server.game]);
 
   // Procedural ASCII Gameplay video simulation ticker
   useEffect(() => {
@@ -1294,7 +1292,11 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
               <div className="px-6 py-4 border-b border-neutral-850/80 bg-neutral-900/10 flex flex-col md:flex-row md:items-center justify-between gap-4 flex-shrink-0">
                 <div className="flex-1 max-w-lg relative">
                   <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-neutral-500">
-                    <Search className="w-4 h-4" />
+                    {isLoadingLiveMods ? (
+                      <RefreshCw className="w-4 h-4 text-indigo-400 animate-spin" />
+                    ) : (
+                      <Search className="w-4 h-4" />
+                    )}
                   </span>
                   <input
                     type="text"

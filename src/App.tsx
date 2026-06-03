@@ -35,6 +35,56 @@ export default function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
+  // Ersteinrichtung / Super-Admin Setup states
+  const [isSetupNeeded, setIsSetupNeeded] = useState<boolean | null>(null);
+  const [setupUsername, setSetupUsername] = useState("");
+  const [setupPassword, setSetupPassword] = useState("");
+  const [isSettingUp, setIsSettingUp] = useState(false);
+  const [setupError, setSetupError] = useState<string | null>(null);
+
+  const checkSetupStatus = async () => {
+    try {
+      const res = await fetch("/api/setup-status");
+      if (res.ok) {
+        const data = await res.json();
+        setIsSetupNeeded(!data.initialized);
+      }
+    } catch (err) {
+      console.error("Checking setup status failed:", err);
+    }
+  };
+
+  const handleSetupSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!setupUsername || !setupPassword) {
+      setSetupError("Bitte füllen Sie alle Pflichtfelder aus (Benutzername & Passwort)!");
+      return;
+    }
+    setIsSettingUp(true);
+    setSetupError(null);
+    try {
+      const res = await fetch("/api/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: setupUsername, password: setupPassword })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCurrentUser(data.user);
+        localStorage.setItem("gcore_current_user", JSON.stringify(data.user));
+        setIsSetupNeeded(false);
+        showNotification("Ersteinrichtung erfolgreich! Super-Admin wurde registriert.");
+      } else {
+        const err = await res.json();
+        setSetupError(err.error || "Unerwarteter Fehler bei der Ersteinrichtung.");
+      }
+    } catch (err) {
+      setSetupError("Verbindung zum Setup-Server verweigert.");
+    } finally {
+      setIsSettingUp(false);
+    }
+  };
+
   const [activeTab, setActiveTab] = useState<NavigationTab>("overview");
   const [accentColor, setAccentColor] = useState<"indigo" | "emerald" | "orange" | "pink">(() => {
     const saved = localStorage.getItem("gcore_accent_color");
@@ -102,6 +152,7 @@ export default function App() {
 
   // Load everything on mount
   useEffect(() => {
+    checkSetupStatus();
     fetchData();
 
     // Periodically update statistics & servers state to simulate active host terminal polling
@@ -361,12 +412,91 @@ export default function App() {
     }
   };
 
+  if (isSetupNeeded === null) {
+    return (
+      <div className="min-h-screen bg-[#070709] flex items-center justify-center">
+        <div className="text-center space-y-3">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500 mx-auto"></div>
+          <p className="text-xs text-neutral-500 font-mono">Lese Systemeinrichtung...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isSetupNeeded) {
+    return (
+      <div className="min-h-screen bg-[#070709] bg-gradient-to-tr from-[#070709] via-[#0d0d12] to-[#040406] flex items-center justify-center p-4 relative overflow-hidden">
+        <div className="absolute inset-x-0 top-0 h-80 bg-gradient-to-b from-indigo-500/10 to-transparent blur-[120px] pointer-events-none opacity-50" />
+        <div className="w-full max-w-sm bg-[#121216]/90 border border-neutral-850 rounded-2xl p-6 md:p-8 shadow-2xl flex flex-col space-y-6 animate-fade-in backdrop-blur-md relative z-10">
+          
+          <div className="flex flex-col items-center text-center">
+            <div className={`w-12 h-12 bg-indigo-600/15 border border-indigo-505/30 text-indigo-400 rounded-xl flex items-center justify-center shadow-lg mb-3`}>
+              <ShieldCheck className="w-6 h-6 text-indigo-400" />
+            </div>
+            <h1 className="text-lg font-extrabold tracking-tight text-white uppercase font-sans">
+              ERSTEINRICHTUNG
+            </h1>
+            <p className="text-xs text-indigo-400 font-mono mt-1">Super-Administrator anlegen</p>
+            <p className="text-neutral-450 text-[11px] mt-3 leading-relaxed">
+              Willkommen bei Ihrer Spieleserver-Umgebung! Erstellen Sie hier den initialen Haupt-Admin-Account mit vollen Berechtigungen.
+            </p>
+          </div>
+
+          <form onSubmit={handleSetupSubmit} className="space-y-4">
+            <div>
+              <label className="block text-xxs font-bold uppercase tracking-wider text-neutral-450 mb-1.5 font-mono">
+                Super-Admin Benutzername
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="z.B. admin oder kilian"
+                value={setupUsername}
+                onChange={(e) => setSetupUsername(e.target.value)}
+                className="w-full bg-[#1c1c24] border border-[#24242a] rounded-lg px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-sans"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xxs font-bold uppercase tracking-wider text-neutral-450 mb-1.5 font-mono">
+                Sicheres Admin-Passwort
+              </label>
+              <input
+                type="password"
+                required
+                placeholder="Passwort eingeben"
+                value={setupPassword}
+                onChange={(e) => setSetupPassword(e.target.value)}
+                className="w-full bg-[#1c1c24] border border-[#24242a] rounded-lg px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-sans"
+              />
+            </div>
+
+            {setupError && (
+              <div className="bg-red-952/10 border border-red-900/30 text-red-400 p-2.5 rounded-lg text-xxs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <span>{setupError}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isSettingUp}
+              className="w-full disabled:opacity-55 text-white font-extrabold text-xs py-3 px-4 rounded-lg shadow-lg cursor-pointer bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/10 uppercase tracking-wide transition-all"
+            >
+              {isSettingUp ? "Richtet ein..." : "ERSTEINRICHTUNG ABSCHLIESSEN & EINLOGGEN"}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-[#070709] bg-gradient-to-tr from-[#070709] via-[#0d0d12] to-[#040406] flex items-center justify-center p-4 relative overflow-hidden">
         {/* Animated ambient background logic inside Login Screen */}
         <div className="absolute inset-x-0 top-0 h-80 bg-gradient-to-b from-indigo-500/10 to-transparent blur-[120px] pointer-events-none opacity-50" />
-        <div className="w-full max-w-md bg-[#121216]/90 border border-neutral-850 rounded-2xl p-6 md:p-8 shadow-2xl flex flex-col space-y-6 animate-fade-in backdrop-blur-md relative z-10">
+        <div className="w-full max-w-sm bg-[#121216]/90 border border-neutral-850 rounded-2xl p-6 md:p-8 shadow-2xl flex flex-col space-y-6 animate-fade-in backdrop-blur-md relative z-10">
           {/* Logo & Header */}
           <div className="flex flex-col items-center text-center">
             <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-lg mb-3 transition-all duration-300 ${
@@ -397,7 +527,7 @@ export default function App() {
                 placeholder="Name eingeben (z.B. admin)"
                 value={loginUsername}
                 onChange={(e) => setLoginUsername(e.target.value)}
-                className={`w-full bg-[#1c1c24] border border-[#24242a] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none transition-all ${
+                className={`w-full bg-[#1c1c24] border border-[#24242a] rounded-lg px-3.5 py-2.5 text-xs text-white focus:outline-none transition-all ${
                   accentColor === "indigo" ? "focus:border-indigo-500" :
                   accentColor === "emerald" ? "focus:border-emerald-500" :
                   accentColor === "orange" ? "focus:border-orange-500" :
@@ -415,10 +545,10 @@ export default function App() {
               <input
                 type="password"
                 required
-                placeholder="Kennwort eingeben (z.B. admin)"
+                placeholder="Passwort eingeben"
                 value={loginPassword}
                 onChange={(e) => setLoginPassword(e.target.value)}
-                className={`w-full bg-[#1c1c24] border border-[#24242a] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none transition-all ${
+                className={`w-full bg-[#1c1c24] border border-[#24242a] rounded-lg px-3.5 py-2.5 text-xs text-white focus:outline-none transition-all ${
                   accentColor === "indigo" ? "focus:border-indigo-500" :
                   accentColor === "emerald" ? "focus:border-emerald-500" :
                   accentColor === "orange" ? "focus:border-orange-500" :
@@ -437,7 +567,7 @@ export default function App() {
             <button
               type="submit"
               disabled={isLoggingIn}
-              className={`w-full disabled:opacity-55 text-white font-extrabold text-xs py-2.8 px-4 rounded-lg shadow-lg cursor-pointer flex justify-center items-center gap-1 uppercase tracking-wide transition-all ${
+              className={`w-full disabled:opacity-55 text-white font-extrabold text-[#ffffff] text-xs py-2.8 px-4 rounded-lg shadow-lg cursor-pointer flex justify-center items-center gap-1 uppercase tracking-wide transition-all ${
                 accentColor === "indigo" ? "bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/10" :
                 accentColor === "emerald" ? "bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/10" :
                 accentColor === "orange" ? "bg-orange-600 hover:bg-orange-500 shadow-orange-500/10" :
@@ -447,48 +577,6 @@ export default function App() {
               {isLoggingIn ? "Authentifizierung..." : "IM SYSTEM ANMELDEN"}
             </button>
           </form>
-
-          {/* Preset Helper Area */}
-          <div className="border-t border-neutral-850 pt-5 mt-2 bg-neutral-950/20 rounded-b-xl">
-            <span className="block text-[10px] font-bold uppercase tracking-widest text-[#6c6c7d] text-center mb-3">
-              DEMO ACCOUNTS (SCHNELLANMELDUNG)
-            </span>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setLoginUsername("admin");
-                  setLoginPassword("admin");
-                }}
-                className="bg-neutral-950 hover:bg-indigo-950/20 text-xxs text-zinc-400 hover:text-white py-2 px-2.5 rounded border border-neutral-850 font-semibold transition-all cursor-pointer font-mono"
-              >
-                ADMIN
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setLoginUsername("moderator");
-                  setLoginPassword("moderator");
-                }}
-                className="bg-neutral-950 hover:bg-indigo-950/20 text-xxs text-zinc-400 hover:text-white py-2 px-2.5 rounded border border-neutral-850 font-semibold transition-all cursor-pointer font-mono"
-              >
-                MODERATOR
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setLoginUsername("viewer");
-                  setLoginPassword("viewer");
-                }}
-                className="bg-neutral-950 hover:bg-indigo-950/20 text-xxs text-zinc-400 hover:text-white py-2 px-2.5 rounded border border-neutral-850 font-semibold transition-all cursor-pointer font-mono"
-              >
-                VIEWER
-              </button>
-            </div>
-            <p className="text-[9px] text-[#555562] mt-3.5 text-center leading-normal">
-              Die Zugangsdaten können in der Nutzerverwaltung beliebig geändert und neue Accounts registriert werden.
-            </p>
-          </div>
         </div>
       </div>
     );

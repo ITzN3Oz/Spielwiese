@@ -194,38 +194,23 @@ if command -v ufw &> /dev/null && ufw status | grep -q "active"; then
     echo -e "Konfiguriere ${YELLOW}UFW (Uncomplicated Firewall)${NC}..."
     # Core system web interface
     ufw allow 3000/tcp comment 'Kilians Spielwiese Web Admin Dashboard'
-    # Default Minecraft Server Port
-    ufw allow 25565/tcp comment 'Minecraft Server Traffic'
-    # Default CS2 (Source engine) Traffic
-    ufw allow 27015/tcp comment 'CS2 Server Traffic TCP'
-    ufw allow 27015/udp comment 'CS2 Server Traffic UDP'
-    # Default Valheim Game Port
-    ufw allow 2456/udp comment 'Valheim Server Traffic'
-    # Default DayZ Game Ports
-    ufw allow 2302:2305/udp comment 'DayZ Game Traffic'
-    ufw allow 27016/udp comment 'DayZ Steam Query Traffic'
-    # Default Rust Game Port
-    ufw allow 28015/udp comment 'Rust Game Traffic'
-    ufw allow 28016/tcp comment 'Rust Rcon Traffic'
+    # Open full game server range TCP and UDP for all current & future installations
+    ufw allow 2000:30000/tcp comment 'Kilians Spielwiese Game Servers TCP Range'
+    ufw allow 2000:30000/udp comment 'Kilians Spielwiese Game Servers UDP Range'
     
     ufw reload >/dev/null
     echo -e "UFW-Filterregeln wurden ${GREEN}erfolgreich registriert${NC}!"
 elif command -v firewall-cmd &> /dev/null && systemctl is-active --quiet firewalld; then
     echo -e "Konfiguriere ${YELLOW}Firewalld${NC}..."
     firewall-cmd --permanent --add-port=3000/tcp >/dev/null
-    firewall-cmd --permanent --add-port=25565/tcp >/dev/null
-    firewall-cmd --permanent --add-port=27015/tcp >/dev/null
-    firewall-cmd --permanent --add-port=27015/udp >/dev/null
-    firewall-cmd --permanent --add-port=2456/udp >/dev/null
-    firewall-cmd --permanent --add-port=2302-2305/udp >/dev/null
-    firewall-cmd --permanent --add-port=27016/udp >/dev/null
-    firewall-cmd --permanent --add-port=28015/udp >/dev/null
-    firewall-cmd --permanent --add-port=28016/tcp >/dev/null
+    # Open full game server range TCP and UDP
+    firewall-cmd --permanent --add-port=2000-30000/tcp >/dev/null
+    firewall-cmd --permanent --add-port=2000-30000/udp >/dev/null
     
     firewall-cmd --reload >/dev/null
     echo -e "Firewalld-Filterregeln wurden ${GREEN}erfolgreich registriert${NC}!"
 else
-    echo -e "${YELLOW}[INFO] Keine aktive UFW oder Firewalld gefunden. Ports (3000, 25565, 27015, 2456) müssen manuell im Router/ISP freigegeben werden.${NC}"
+    echo -e "${YELLOW}[INFO] Keine aktive UFW oder Firewalld gefunden. Ports (3000, 2000-30000) müssen manuell im Router/ISP freigegeben werden.${NC}"
 fi
 
 # 5. SYSTEMD INTEGRATION (RECOVERY, DAEMONIZING)

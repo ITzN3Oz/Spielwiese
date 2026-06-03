@@ -375,7 +375,7 @@ export default function ServerList({
                 {/* Card Top */}
                 <div className="flex justify-between items-start">
                   <div className="flex gap-3">
-                    <GameIcon game={srv.game} className="w-11 h-11 flex-shrink-0" />
+                    <GameIcon game={srv.game} className="w-11 h-11 flex-shrink-0" iconUrl={srv.iconUrl} />
                     <div>
                       <h4 className="font-bold text-white text-sm tracking-wide">{srv.name}</h4>
                       <p className="text-[10px] text-neutral-500 mt-1 font-mono tracking-tight truncate max-w-[185px] sm:max-w-[220px]">
@@ -574,13 +574,16 @@ export default function ServerList({
                   {/* Uninstall container */}
                   <button
                     onClick={() => {
-                      if (confirm(`Sind Sie sicher, dass Sie '${srv.name}' löschen und uninstalleiren wollen?`)) {
+                      const warningMsg = isRunning
+                        ? `ACHTUNG: Der Server '${srv.name}' ist AKTIV und läuft zurzeit.\n\nDurch das Deinstallieren wird dieser laufende Container auf Ihrem Linux-System hart gestoppt und unwiderruflich aus Docker entfernt. Alle nicht gesicherten Spieldaten gehen verloren!\n\nMöchten Sie wirklich fortfahren?`
+                        : `Sind Sie sicher, dass Sie '${srv.name}' löschen und deinstallieren wollen? Alle zugehörigen Volumes, Docker-Container und Lokale-Konfigurationen werden unwiderruflich entfernt.`;
+                      
+                      if (confirm(warningMsg)) {
                         onDeleteServer(srv.id);
                       }
                     }}
-                    disabled={isRunning}
-                    className="bg-neutral-800 hover:bg-red-950/50 hover:text-red-400 disabled:opacity-30 border border-neutral-700 hover:border-red-900/20 p-1.5 rounded-lg text-neutral-500 transition-colors ml-auto"
-                    title="Server deinstallieren (Nur im gestoppten Zustand)"
+                    className="bg-neutral-800 hover:bg-red-950/50 hover:text-red-400 border border-neutral-700 hover:border-red-900/20 p-1.5 rounded-lg text-neutral-500 transition-colors ml-auto cursor-pointer"
+                    title={isRunning ? "Server stoppen und deinstallieren" : "Server deinstallieren"}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
