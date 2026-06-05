@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# "Kilians Spielwiese" Web-Admin-Hypervisor Automated Installer & Host Configurator
+# "Gameserver Labor" Web-Admin-Hypervisor Automated Installer & Host Configurator
 # ==============================================================================
 # High-compatibility setup script for Ubuntu, Debian, CentOS, RHEL, and Fedora.
 # Ensures that Node.js, Docker, UFW/Firewall, systemd, and local file storage 
@@ -193,10 +193,10 @@ echo -e "\n${BLUE}[SCHRITT 4/5] Port-Freigabe und Firewall-Härtung konfiguriere
 if command -v ufw &> /dev/null && ufw status | grep -q "active"; then
     echo -e "Konfiguriere ${YELLOW}UFW (Uncomplicated Firewall)${NC}..."
     # Core system web interface
-    ufw allow 3000/tcp comment 'Kilians Spielwiese Web Admin Dashboard'
+    ufw allow 3000/tcp comment 'Gameserver Labor Web Admin Dashboard'
     # Open full game server range TCP and UDP for all current & future installations
-    ufw allow 2000:30000/tcp comment 'Kilians Spielwiese Game Servers TCP Range'
-    ufw allow 2000:30000/udp comment 'Kilians Spielwiese Game Servers UDP Range'
+    ufw allow 2000:30000/tcp comment 'Gameserver Labor Game Servers TCP Range'
+    ufw allow 2000:30000/udp comment 'Gameserver Labor Game Servers UDP Range'
     
     ufw reload >/dev/null
     echo -e "UFW-Filterregeln wurden ${GREEN}erfolgreich registriert${NC}!"
@@ -223,23 +223,23 @@ NPM_PATH=$(command -v npm || echo "/usr/bin/npm")
 echo -e "Node-Pfad gefunden: ${YELLOW}${NODE_PATH}${NC}"
 echo -e "NPM-Pfad gefunden: ${YELLOW}${NPM_PATH}${NC}"
 
-cat <<EOF > /etc/systemd/system/spielwiese.service
+cat <<EOF > /etc/systemd/system/gameserver-labor.service
 [Unit]
-Description=Kilians Spielwiese Game Server Hypervisor Dashboard
+Description=Gameserver Labor Game Server Hypervisor Dashboard
 After=network.target docker.service
 Requires=docker.service
 
 [Service]
 Type=simple
-User=spielwiese
-WorkingDirectory=/opt/kilians-spielwiese
+User=gameserver-labor
+WorkingDirectory=/opt/gameserver-labor
 Environment=NODE_ENV=production PORT=3000 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=${NPM_PATH} start
 Restart=always
 RestartSec=10
 StandardOutput=syslog
 StandardError=syslog
-SyslogIdentifier=kilians-spielwiese
+SyslogIdentifier=gameserver-labor
 
 [Install]
 WantedBy=multi-user.target

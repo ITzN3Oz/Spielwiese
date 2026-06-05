@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { GameServer } from "../types";
 import FloatingWindow from "./FloatingWindow";
+import { useLanguage } from "../LanguageContext";
 import { GAME_TEMPLATES } from "./ServerCatalog";
+import FileExplorerTree, { getFileDataTypeInfo } from "./FileExplorerTree";
 import {
   Folder,
   FolderOpen,
@@ -45,9 +47,10 @@ interface ServerModsManagerProps {
   server: GameServer;
   onClose: () => void;
   onAddConsoleLog?: (message: string, type?: "info" | "warn" | "error" | "output") => void;
+  onSaveConfig?: (id: string, updateData: Partial<GameServer>) => void;
 }
 
-interface ServerFile {
+export interface ServerFile {
   name: string;
   path: string;
   content: string;
@@ -64,7 +67,7 @@ interface ServerMod {
   installed: boolean;
   longDescription: string;
   imageBg: string; // fallback color bg
-  videoType: "mc_build" | "dayz_zombies" | "cs2_practice" | "rust_raid" | "custom";
+  videoType: "mc_build" | "dayz_zombies" | "cs2_practice" | "rust_raid" | "custom" | "theme_art";
   origin: "Steam Workshop" | "CurseForge" | "Modrinth" | "SpigotMC" | "GitHub Releases";
   rating: number;
   fileSize: string;
@@ -75,6 +78,9 @@ interface ServerMod {
   detailedFeatures?: string[];
   verificationScore?: number; // 0-100 score
   trustedHub?: boolean;
+  compatibleVersions?: string[];
+  latestVersion?: string;
+  updateAvailable?: boolean;
 }
 
 // Preset Mods for games with premium layout metadata fields (pictures representation, videos simulation, origin context)
@@ -431,7 +437,8 @@ const PRESET_MODS_RICH: Record<string, Omit<ServerMod, "installed">[]> = {
   ]
 };
 
-export default function ServerModsManager({ server, onClose, onAddConsoleLog }: ServerModsManagerProps) {
+export default function ServerModsManager({ server, onClose, onAddConsoleLog, onSaveConfig }: ServerModsManagerProps) {
+  const { t } = useLanguage();
   const [activeSubTab, setActiveSubTab] = useState<"mods" | "files">("mods");
   const [viewMode, setViewMode] = useState<"list" | "gallery">("gallery");
   const [selectedImageIndex, setSelectedImageIndex] = useState<number>(0);
@@ -443,6 +450,26 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
   const [installingModId, setInstallingModId] = useState<string | null>(null);
   const [installStep, setInstallStep] = useState("");
   const [installProgress, setInstallProgress] = useState(0);
+  const [installedModIds, setInstalledModIds] = useState<string[]>([]);
+  const [isLoadingLiveMods, setIsLoadingLiveMods] = useState(false);
+  
+  // Custom multi-source registry selectors: CurseForge, Steam Workshop, Modrinth, etc.
+  const [selectedRegistry, setSelectedRegistry] = useState<string>("All");
+
+  // Selected Spielversion (Game Version) to filter/search mods for
+  const [selectedVersion, setSelectedVersion] = useState<string>("All");
+
+  useEffect(() => {
+    if (server && server.version) {
+      setSelectedVersion(server.version);
+    }
+  }, [server.id, server.version]);
+  
+  // Mod Updater and Version Alignment states
+  const [updatingModId, setUpdatingModId] = useState<string | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<number | null>(null);
+  const [isUpdatingAll, setIsUpdatingAll] = useState(false);
+  const [isAligning, setIsAligning] = useState(false);
 
   // Simulated Video Player status
   const [isPlayingVideo, setIsPlayingVideo] = useState(false);
@@ -463,6 +490,37 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
   const [isUploading, setIsUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
 
+  // Expanded Folders layout state
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
+
+  // Visual Form & Datatype configuration states
+  const [editorMode, setEditorMode] = useState<"code" | "visual">("code");
+  const [visualConfigData, setVisualConfigData] = useState<{key: string; value: any; type: "boolean"|"number"|"text"; originalSeparator?: string}[]>([]);
+  const [newParamKey, setNewParamKey] = useState("");
+  const [newParamVal, setNewParamVal] = useState("");
+  const [newParamType, setNewParamType] = useState<"text" | "boolean" | "number">("text");
+
+  const toggleFolder = (folderPath: string) => {
+    setExpandedFolders(prev => ({ ...prev, [folderPath]: !prev[folderPath] }));
+  };
+
+  useEffect(() => {
+    if (filesList.length > 0) {
+      const autoExpand: Record<string, boolean> = {};
+      filesList.forEach((file) => {
+        const parts = file.path.split(/[/\\]/);
+        if (parts.length > 1) {
+          let accumulated = "";
+          for (let i = 0; i < parts.length - 1; i++) {
+            accumulated = accumulated ? `${accumulated}/${parts[i]}` : parts[i];
+            autoExpand[accumulated] = true;
+          }
+        }
+      });
+      setExpandedFolders(prev => ({ ...autoExpand, ...prev }));
+    }
+  }, [filesList]);
+
   // Notification states
   const [notification, setNotification] = useState<{ message: string; isError?: boolean } | null>(null);
 
@@ -473,6 +531,222 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
   const showNotification = (message: string, isError = false) => {
     setNotification({ message, isError });
     setTimeout(() => setNotification(null), 4000);
+  };
+
+  const buildFolderTree = (files: ServerFile[]) => {
+    const root: Record<string, any> = {};
+
+    for (const file of files) {
+      if (!file.path) continue;
+      const parts = file.path.split(/[/\\]/);
+      let currentLevel = root;
+      let accumulatedPath = "";
+
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        accumulatedPath = accumulatedPath ? `${accumulatedPath}/${part}` : part;
+        const isLast = i === parts.length - 1;
+
+        if (isLast) {
+          currentLevel[part] = {
+            name: part,
+            path: file.path,
+            isDirectory: false,
+            file: file,
+          };
+        } else {
+          if (!currentLevel[part]) {
+            currentLevel[part] = {
+              name: part,
+              path: accumulatedPath,
+              isDirectory: true,
+              children: {},
+            };
+          }
+          currentLevel = currentLevel[part].children;
+        }
+      }
+    }
+    return root;
+  };
+
+  // Parser, Synchronizer, and Visual Configuration Helpers
+  const handleParseVisualConfig = (contentStr: string, fileName: string) => {
+    const ext = fileName.split(".").pop()?.toLowerCase() || "";
+    if (ext === "json") {
+      try {
+        const parsed = JSON.parse(contentStr);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          const list = Object.entries(parsed).map(([key, val]) => {
+            let type: "boolean"|"number"|"text" = "text";
+            if (typeof val === "boolean") type = "boolean";
+            else if (typeof val === "number") type = "number";
+            return { key, value: val, type };
+          });
+          setVisualConfigData(list);
+          return;
+        }
+      } catch (e) {}
+    } else if (["properties", "cfg", "conf", "config", "ini"].includes(ext)) {
+      const lines = contentStr.split("\n");
+      const list: any[] = [];
+      lines.forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith(";")) return;
+        const idx = trimmed.indexOf("=");
+        const idxColon = trimmed.indexOf(":");
+        let splitChar = "";
+        let pivotIdx = -1;
+        if (idx !== -1 && (idxColon === -1 || idx < idxColon)) {
+          splitChar = "=";
+          pivotIdx = idx;
+        } else if (idxColon !== -1) {
+          splitChar = ":";
+          pivotIdx = idxColon;
+        }
+        
+        if (pivotIdx !== -1) {
+          const k = trimmed.substring(0, pivotIdx).trim();
+          const vRaw = trimmed.substring(pivotIdx + 1).trim();
+          let v = vRaw;
+          if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+            v = v.substring(1, v.length - 1);
+          }
+          
+          let type: "boolean"|"number"|"text" = "text";
+          if (v.toLowerCase() === "true" || v.toLowerCase() === "false") {
+            type = "boolean";
+          } else if (!isNaN(Number(v)) && v !== "") {
+            type = "number";
+          }
+          list.push({ key: k, value: v, type, originalSeparator: splitChar });
+        }
+      });
+      setVisualConfigData(list);
+      return;
+    }
+    setVisualConfigData([]);
+  };
+
+  const handleUpdateVisualValue = (idx: number, newVal: any) => {
+    const list = [...visualConfigData];
+    list[idx].value = newVal;
+    setVisualConfigData(list);
+
+    // Sync state visual values back to raw editorText representation layout dynamically
+    const fileType = selectedFile?.name.split(".").pop()?.toLowerCase() || "";
+    if (fileType === "json") {
+      try {
+        const obj: Record<string, any> = {};
+        list.forEach((item) => {
+          let finalVal = item.value;
+          if (item.type === "boolean") {
+            finalVal = item.value === true || item.value === "true";
+          } else if (item.type === "number") {
+            finalVal = Number(item.value);
+          }
+          obj[item.key] = finalVal;
+        });
+        setEditorContent(JSON.stringify(obj, null, 2));
+      } catch (err) {}
+    } else {
+      const lines = editorContent.split("\n");
+      const updatedLines = lines.map((line) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith(";")) return line;
+        
+        const idxEq = trimmed.indexOf("=");
+        const idxCol = trimmed.indexOf(":");
+        let pivot = -1;
+        if (idxEq !== -1 && (idxCol === -1 || idxEq < idxCol)) pivot = idxEq;
+        else if (idxCol !== -1) pivot = idxCol;
+
+        if (pivot !== -1) {
+          const k = trimmed.substring(0, pivot).trim();
+          const item = list.find((it) => it.key === k);
+          if (item) {
+            const separator = item.originalSeparator || "=";
+            return `${item.key}${separator}${item.value}`;
+          }
+        }
+        return line;
+      });
+      setEditorContent(updatedLines.join("\n"));
+    }
+  };
+
+  const handleAddVisualParam = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newParamKey.trim() || !selectedFile) return;
+
+    let parsedVal: any = newParamVal;
+    if (newParamType === "boolean") {
+      parsedVal = newParamVal.toLowerCase() === "true" || newParamVal === "1";
+    } else if (newParamType === "number") {
+      parsedVal = Number(newParamVal) || 0;
+    }
+
+    const newItem = {
+      key: newParamKey.trim(),
+      value: parsedVal,
+      type: newParamType,
+      originalSeparator: "="
+    };
+
+    const updatedList = [...visualConfigData, newItem];
+    setVisualConfigData(updatedList);
+    setNewParamKey("");
+    setNewParamVal("");
+
+    // Sync newly added visual item back to editor state
+    const fileType = selectedFile.name.split(".").pop()?.toLowerCase() || "";
+    if (fileType === "json") {
+      try {
+        const obj: Record<string, any> = {};
+        updatedList.forEach((item) => {
+          let finalVal = item.value;
+          if (item.type === "boolean") {
+            finalVal = item.value === true || item.value === "true";
+          } else if (item.type === "number") {
+            finalVal = Number(item.value);
+          }
+          obj[item.key] = finalVal;
+        });
+        setEditorContent(JSON.stringify(obj, null, 2));
+      } catch (err) {}
+    } else {
+      // For properties format, simply append a new line at the end
+      const appended = editorContent.trim() + `\n${newItem.key}=${newItem.value}\n`;
+      setEditorContent(appended);
+    }
+    showNotification(`Parameter '${newItem.key}' hinzugefügt! Speichern Sie, um zu schreiben.`);
+  };
+
+  const handleDeletePath = async (pathToDelete: string, isDirectory: boolean) => {
+    const typeLabel = isDirectory ? "das Verzeichnis" : "die Datei";
+    if (!window.confirm(`Möchten Sie ${typeLabel} '${pathToDelete}' wirklich dauerhaft vom Server löschen? Dieser Vorgang ist unumkehrbar.`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/servers/${server.id}/files?filename=${encodeURIComponent(pathToDelete)}`, {
+        method: "DELETE"
+      });
+
+      if (res.ok) {
+        showNotification(`${isDirectory ? "Verzeichnis" : "Datei"} erfolgreich gelöscht.`, false);
+        if (selectedFile?.path === pathToDelete) {
+          setSelectedFile(null);
+          setEditorContent("");
+        }
+        await fetchInstalledModsAndFiles();
+      } else {
+        const errData = await res.json();
+        showNotification(`Löschen fehlgeschlagen: ${errData.error || "Unbekannter Fehler"}`, true);
+      }
+    } catch (err) {
+      showNotification("Netzwerkfehler beim Löschen", true);
+    }
   };
 
   const fetchInstalledModsAndFiles = async () => {
@@ -492,6 +766,8 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
       const resMods = await fetch(`/api/servers/${server.id}/mods`);
       if (resMods.ok) {
         const installedModsIds: string[] = await resMods.json();
+        setInstalledModIds(installedModsIds);
+
         const baseMods = PRESET_MODS_RICH[server.game] || PRESET_MODS_RICH["minecraft"]; // Fallback to MC mods
 
         const initializedMods = baseMods.map((bm) => ({
@@ -499,9 +775,12 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
           installed: installedModsIds.includes(bm.id)
         })) as ServerMod[];
 
-        setModsList(initializedMods);
-        if (initializedMods.length > 0 && !selectedMod) {
-          handleSelectMod(initializedMods[0]);
+        // Only overwrite local list if search query is empty
+        if (!modSearch.trim()) {
+          setModsList(initializedMods);
+          if (initializedMods.length > 0 && !selectedMod) {
+            handleSelectMod(initializedMods[0]);
+          }
         }
       }
     } catch (err) {
@@ -515,74 +794,218 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
     setIsPlayingVideo(false);
   };
 
-  const handleSearchMods = () => {
-    const baseMods = PRESET_MODS_RICH[server.game] || PRESET_MODS_RICH["minecraft"];
-    const query = modSearch.toLowerCase().trim();
+  // Helper to check version compatibility between server and mod supported list
+  const isVersionCompatible = (srvVer: string, modVers?: string[]) => {
+    if (!modVers || modVers.length === 0) return true;
+    if (srvVer === "Updated (Latest)" || srvVer === "1.0.0-Docker" || srvVer === "latest") return true;
+    
+    return modVers.some((v) => {
+      if (v === srvVer) return true;
+      if (srvVer.startsWith(v) || v.startsWith(srvVer)) return true;
+      return false;
+    });
+  };
 
-    if (!query) {
-      fetchInstalledModsAndFiles();
-      return;
+  // One-click server versions alignment action
+  const handleAlignServerVersion = async (targetVersion: string) => {
+    setIsAligning(true);
+    showNotification(`Passe Server-Version von '${server.version}' auf '${targetVersion}' an...`);
+    if (onAddConsoleLog) {
+      onAddConsoleLog(`[Compat Engine] Initializing versions align lookup. Aligned server.version to -> ${targetVersion}.`, "warn");
     }
 
-    const filtered = baseMods.filter(
-      (m) => m.name.toLowerCase().includes(query) || m.description.toLowerCase().includes(query)
-    );
+    try {
+      const updatedServer = { ...server, version: targetVersion };
+      const res = await fetch(`/api/servers/${server.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updatedServer)
+      });
+      if (!res.ok) throw new Error("Fehler beim Aktualisieren der Server-Version");
+      
+      showNotification(`Server-Version wurde auf ${targetVersion} angepasst! Konfiguriere Container...`);
+      
+      // Update template state callback
+      if (onSaveConfig) {
+        onSaveConfig(server.id, { version: targetVersion });
+      }
 
-    const hasPerfectMatch = filtered.some((m) => m.name.toLowerCase() === query);
+      // Simulate a docker daemon rebuild
+      await fetch(`/api/servers/${server.id}/update`, { method: "POST" });
+      if (onAddConsoleLog) {
+        onAddConsoleLog(`[Compat Engine] Server successfully updated to version ${targetVersion}. Reboot scheduled.`, "info");
+      }
 
-    const results = filtered.map((bm) => {
-      const isInst = filesList.some(f => f.name.toLowerCase().includes(bm.id));
-      return { ...bm, installed: isInst };
-    }) as ServerMod[];
-
-    // Support searching ANY arbitrary game mod dynamically
-    if (!hasPerfectMatch && query.length > 1) {
-      const capitalizedQuery = query.charAt(0).toUpperCase() + query.slice(1);
-      const dynamicMod: ServerMod = {
-        id: `steam-${query.replace(/\s+/g, "-")}`,
-        name: `${capitalizedQuery} Expansion Patch`,
-        version: "2.4.0-release",
-        author: "WorkshopCommunity_Dev",
-        downloads: "6.2 K",
-        description: `Individuell geladene Workshop-Komponente '${capitalizedQuery}' von dem Community-Hub. Komplett sandboxed und volumensicher.`,
-        longDescription: `Diese Drittanbieter-Erweiterung für ${server.name} wurde direkt über das SteamCMD / Curse Public Repository ermittelt. Das Paket beinhaltet binäre Konfigurationsdateien, automatische Logging-Anbindung sowie optimierte Container-Pfade.`,
-        imageBg: "from-indigo-900 via-[#121216] to-[#0c0c0d]",
-        videoType: "custom",
-        origin: "Steam Workshop",
-        rating: 4.5,
-        fileSize: "18.2 MB",
-        dependencies: [],
-        defaultConfigs: {
-          "enabled": "true",
-          "update-on-startup": "true",
-          "debug-logs": "false",
-          "intensity-modifier": "1.0"
-        },
-        previewImages: [
-          "https://images.unsplash.com/photo-1614064641938-3bbee52942c7?w=600&auto=format&fit=crop&q=60",
-          "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=600&auto=format&fit=crop&q=60"
-        ],
-        detailedFeatures: [
-          "Dynamische Einbindung über SteamCMD / CurseForge.",
-          "Voll integrierte Live-Protokollierung im Host-Log.",
-          "Verbindet Container-Dateischnittstellen nahtlos."
-        ],
-        verificationScore: 82,
-        trustedHub: false,
-        installed: false
-      };
-      results.push(dynamicMod);
-    }
-
-    setModsList(results);
-    if (results.length > 0) {
-      handleSelectMod(results[0]);
+      showNotification(`Server-Version wurde erfolgreich an '${targetVersion}' angeglichen!`, false);
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+    } catch (err: any) {
+      showNotification(err.message || "Fehler bei der Versions-Synchronisation", true);
+    } finally {
+      setIsAligning(false);
     }
   };
 
+  // Individual Mod Updater with dynamic countdown timer of state sequences
+  const handleUpdateMod = async (mod: ServerMod) => {
+    setUpdatingModId(mod.id);
+    setUpdateProgress(0);
+    if (onAddConsoleLog) {
+      onAddConsoleLog(`[Mod Updater] Fetching online repository update for mod ID: ${mod.id}...`, "info");
+    }
+
+    const interval = setInterval(() => {
+      setUpdateProgress((prev) => {
+        if (prev === null) return 0;
+        if (prev >= 100) {
+          clearInterval(interval);
+          return 100;
+        }
+        return prev + 25;
+      });
+    }, 150);
+
+    try {
+      const res = await fetch(`/api/servers/${server.id}/mods/${mod.id}/update`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ latestVersion: mod.latestVersion })
+      });
+      if (!res.ok) throw new Error("Mod-Update Netzwerkfehler");
+      
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
+      showNotification(`Mod '${mod.name}' wurde erfolgreich auf Version ${mod.latestVersion || "Latest"} aktualisiert!`, false);
+      if (onAddConsoleLog) {
+        onAddConsoleLog(`[Mod Updater] Successfully applied file patches. Mod '${mod.id}' is now on v${mod.latestVersion || "v2.2.0"}.`, "info");
+      }
+
+      setModsList((prev) =>
+        prev.map((m) =>
+          m.id === mod.id
+            ? { ...m, version: m.latestVersion || "Latest", updateAvailable: false }
+            : m
+        )
+      );
+
+      if (selectedMod?.id === mod.id) {
+        setSelectedMod((prev) =>
+          prev
+            ? { ...prev, version: prev.latestVersion || "Latest", updateAvailable: false }
+            : null
+        );
+      }
+
+    } catch (err: any) {
+      showNotification(err.message || "Fehler beim Mod-Update", true);
+    } finally {
+      clearInterval(interval);
+      setUpdatingModId(null);
+      setUpdateProgress(null);
+    }
+  };
+
+  // Full Out-Of-The-Box Bulk Mod Update system action
+  const handleUpdateAllMods = async () => {
+    const upgradableMods = modsList.filter((m) => m.installed && m.updateAvailable);
+    if (upgradableMods.length === 0) {
+      showNotification("Alle installierten Modifikationen sind bereits auf dem neuesten Stand!");
+      return;
+    }
+
+    setIsUpdatingAll(true);
+    showNotification(`Starte automatische Bulk-Aktualisierung von ${upgradableMods.length} Mods...`);
+    if (onAddConsoleLog) {
+      onAddConsoleLog(`[Mod Bulk-Updater] Starting automated sequence for ${upgradableMods.length} out-of-date mods...`, "warn");
+    }
+
+    for (const mod of upgradableMods) {
+      await handleUpdateMod(mod);
+    }
+
+    setIsUpdatingAll(false);
+    showNotification("Alle Mods wurden erfolgreich im Hintergrund aktualisiert!", false);
+    if (onAddConsoleLog) {
+      onAddConsoleLog(`[Mod Bulk-Updater] Bulk sequence completed. All active plugins are synchronized.`, "info");
+    }
+  };
+
+  // Dynamic live search for Mods via Modrinth / GitHub / CurseForge / Steam Workshop with debounce support
   useEffect(() => {
-    handleSearchMods();
-  }, [modSearch]);
+    const query = modSearch.toLowerCase().trim();
+    const baseMods = PRESET_MODS_RICH[server.game] || PRESET_MODS_RICH["minecraft"];
+
+    // Filter local presets by registry and game version selection
+    const filterLocalRegistryAndVersion = (m: ServerMod) => {
+      const matchRegistry = selectedRegistry === "All" || m.origin === selectedRegistry;
+      if (!matchRegistry) return false;
+      if (selectedVersion === "All") return true;
+      const modCompatVers = m.compatibleVersions || (server.game === "minecraft" ? ["1.20.4", "1.20.1"] : ["1.24", "1.25"]);
+      return isVersionCompatible(selectedVersion, modCompatVers);
+    };
+
+    if (!query) {
+      const initialized = baseMods.filter(filterLocalRegistryAndVersion).map((bm) => ({
+        ...bm,
+        installed: installedModIds.includes(bm.id),
+        // Inject mock compat values for presets if missing
+        compatibleVersions: bm.compatibleVersions || (server.game === "minecraft" ? ["1.20.4", "1.20.1"] : ["1.24", "1.25"]),
+        latestVersion: bm.latestVersion || bm.version,
+        updateAvailable: bm.updateAvailable !== undefined ? bm.updateAvailable : (bm.id === "essentialsx" || bm.id === "trader" ? false : true)
+      })) as ServerMod[];
+      setModsList(initialized);
+      return;
+    }
+
+    const filteredLocal = baseMods.filter(filterLocalRegistryAndVersion).filter(
+      (m) => m.name.toLowerCase().includes(query) || m.description.toLowerCase().includes(query)
+    ).map((bm) => ({
+      ...bm,
+      installed: installedModIds.includes(bm.id),
+      compatibleVersions: bm.compatibleVersions || (server.game === "minecraft" ? ["1.20.4", "1.20.1"] : ["1.24", "1.25"]),
+      latestVersion: bm.latestVersion || bm.version,
+      updateAvailable: bm.updateAvailable !== undefined ? bm.updateAvailable : true
+    })) as ServerMod[];
+
+    setIsLoadingLiveMods(true);
+
+    const delayDebounce = setTimeout(() => {
+      fetch(`/api/mods/search?game=${encodeURIComponent(server.game)}&query=${encodeURIComponent(query)}&registry=${selectedRegistry}&version=${selectedVersion}`)
+        .then((res) => {
+          if (!res.ok) throw new Error("Search mods network error");
+          return res.json();
+        })
+        .then((data) => {
+          if (Array.isArray(data)) {
+            const externalResults = data.map((item) => ({
+              ...item,
+              installed: installedModIds.includes(item.id)
+            })) as ServerMod[];
+
+            // Merge local & external without duplicates
+            const merged = [...filteredLocal];
+            externalResults.forEach((ext) => {
+              if (!merged.some((m) => m.id === ext.id)) {
+                merged.push(ext);
+              }
+            });
+
+            setModsList(merged);
+            if (merged.length > 0 && (!selectedMod || !merged.some((m) => m.id === selectedMod.id))) {
+              handleSelectMod(merged[0]);
+            }
+          }
+        })
+        .catch((err) => {
+          console.error("Dynamic web mods look up failed:", err);
+          setModsList(filteredLocal);
+        })
+        .finally(() => setIsLoadingLiveMods(false));
+    }, 400);
+
+    return () => clearTimeout(delayDebounce);
+  }, [modSearch, installedModIds, server.game, selectedRegistry, selectedVersion]);
 
   // Procedural ASCII Gameplay video simulation ticker
   useEffect(() => {
@@ -595,7 +1018,7 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
         if (selectedMod.videoType === "mc_build") {
           const frames = [
             `[RENDER] WorldEdit brush selected: sphere (radius 5)\n[GRID] Coordinates: X:102, Y:64, Z:-309\n[WORLD] Modifying player active volume chunks...\n\n   ███████\n  █████████\n  ██   ████\n   ███████\n\n[SUCCESS] 2,450 blocks placed by brush action (took 4ms).`,
-            `[DYNMAP] Rendering web map viewport zoom factor 3...\n[RENDER] Layer-0 static terrain layout caching.\n\n   ░░░░░░░░\n   ▒▒▒▒▒▒▒▒  [Spawning player: Kilian]\n   ▓▓▓▓▓▓▓▓\n\n[STATUS] Map frame successfully written to dynmap_web.bin.`,
+            `[DYNMAP] Rendering web map viewport zoom factor 3...\n[RENDER] Layer-0 static terrain layout caching.\n\n   ░░░░░░░░\n   ▒▒▒▒▒▒▒▒  [Spawning player: Operator]\n   ▓▓▓▓▓▓▓▓\n\n[STATUS] Map frame successfully written to dynmap_web.bin.`,
             `[SECURITY] Verification of WorldEdit dependencies...\n[OK] Core permissions resolved with standard luckperms rule file.\n\n   [ADMIN_CHECK] Key validated.\n   [DOCKER] Container is healthy.`,
             `[ENGINE] Re-building chunks for WorldEdit operation ID #92\n[WORLD] Undo memory buffered size: 4.1MB.\n\n   ▄▄▄▄▄\n   █   █\n   ▀▀▀▀▀\n\n[INFO] Minecraft Spigot Paper thread is running at stable 20.0 TPS.`
           ];
@@ -749,6 +1172,14 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
     setSelectedFile(file);
     setEditorContent(file.content);
     setIsEditingFile(false);
+    
+    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+    const isConfigurable = ["json", "properties", "cfg", "conf", "config", "ini", "yml", "yaml"].includes(ext);
+    if (isConfigurable) {
+      handleParseVisualConfig(file.content, file.name);
+    } else {
+      setEditorMode("code");
+    }
   };
 
   const handleSaveFileContent = async () => {
@@ -760,7 +1191,7 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          filename: selectedFile.name,
+          filename: selectedFile.path,
           content: editorContent
         })
       });
@@ -769,11 +1200,11 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
         showNotification(`Datei '${selectedFile.name}' erfolgreich gespeichert!`, false);
 
         setFilesList((prev) =>
-          prev.map((f) => (f.name === selectedFile.name ? { ...f, content: editorContent, size: `${Math.round(editorContent.length / 10.24) / 100} KB` } : f))
+          prev.map((f) => (f.path === selectedFile.path ? { ...f, content: editorContent, size: `${Math.round(editorContent.length / 10.24) / 100} KB` } : f))
         );
 
         if (onAddConsoleLog) {
-          onAddConsoleLog(`[Config Monitor] File '/volumes/${server.id}/${selectedFile.name}' rewritten by super admin.`, "warn");
+          onAddConsoleLog(`[Config Monitor] File '/volumes/${server.id}/${selectedFile.path}' rewritten by super admin.`, "warn");
           onAddConsoleLog(`[Docker Daemon] Hot-reloaded game configuration mappings.`, "info");
         }
       } else {
@@ -1116,8 +1547,8 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
               <div className="w-full h-44 bg-neutral-950/80 rounded-lg border border-neutral-900 flex flex-col items-center justify-center text-center p-6 space-y-3.5">
                 <Play className="w-8 h-8 text-indigo-400 cursor-pointer hover:scale-110 transition-transform" onClick={() => setIsPlayingVideo(true)} />
                 <div>
-                  <p className="text-xs text-neutral-300 font-bold">Interaktive Mod-Videovorschau laden</p>
-                  <p className="text-[10px] text-neutral-550 max-w-sm mt-0.5">Startet eine prozedurale Echtzeit-Dokumentation direkt in Kilians Sandbox.</p>
+                  <p className="text-xs text-neutral-300 font-bold">{t("mods.previewTitle", "Interaktive Mod-Videovorschau laden")}</p>
+                  <p className="text-[10px] text-neutral-550 max-w-sm mt-0.5">{t("mods.previewSub", "Startet eine prozedurale Echtzeit-Dokumentation direkt in der Gameserver Labor Sandbox.")}</p>
                 </div>
               </div>
             )}
@@ -1188,6 +1619,114 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
             >
               <Save className="w-3.5 h-3.5" /> Parameter in Config binden
             </button>
+          </div>
+        </div>
+
+        {/* GAME VERSION COMPATIBILITY ANALYSIS TOOL */}
+        <div className="bg-[#121216] border border-[#24242a] rounded-xl p-5 space-y-4">
+          <div className="flex justify-between items-center border-b border-neutral-850 pb-2">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-indigo-400" />
+              <span className="text-xxs font-bold uppercase tracking-wider text-white">Versions-Kompatibilitäts-Prüfung</span>
+            </div>
+            <span className="text-[10px] text-indigo-500 font-mono">Realtime Check</span>
+          </div>
+
+          {(() => {
+            const compatible = isVersionCompatible(server.version, selectedMod.compatibleVersions);
+            return (
+              <div className="space-y-3.5">
+                <div className={`p-4 rounded-xl border flex items-start gap-3.5 ${
+                  compatible 
+                    ? "bg-emerald-950/15 border-emerald-900/40 text-emerald-300" 
+                    : "bg-red-950/15 border-red-900/40 text-red-300"
+                }`}>
+                  {compatible ? (
+                    <Check className="w-5 h-5 text-emerald-400 mt-0.5 flex-shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" />
+                  )}
+                  <div className="flex-1 space-y-1">
+                    <p className="text-xs font-bold leading-normal">
+                      {compatible ? "Kompatibilität hervorragend!" : "Versions-Inkompatibilität erkannt!"}
+                    </p>
+                    <p className="text-[11px] opacity-80 leading-relaxed">
+                      Der Server läuft unter der Version <strong className="font-mono text-white bg-neutral-900 px-1 py-0.5 rounded">{server.version}</strong>. 
+                      Diese Modifikation zertifiziert die Kompatibilität für: <strong className="font-mono text-white bg-neutral-900 px-1 py-0.5 rounded">{selectedMod.compatibleVersions?.join(", ") || "Alle Versionen"}</strong>.
+                    </p>
+                  </div>
+                </div>
+
+                {!compatible && (
+                  <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-850/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-pulse">
+                    <div className="space-y-0.5">
+                      <p className="text-[11px] font-bold text-white">Ein-Klick Versionsanpassung</p>
+                      <p className="text-[10px] text-neutral-500 leading-normal">Pappe das globale Host-Image im Container automatisch an diese Mod an.</p>
+                    </div>
+                    <button
+                      disabled={isAligning}
+                      onClick={() => handleAlignServerVersion(selectedMod.compatibleVersions?.[0] || "1.20.1")}
+                      className="bg-indigo-600 hover:bg-indigo-550 disabled:opacity-50 text-white font-bold text-xs px-3.5 py-2 rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow"
+                    >
+                      {isAligning ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                      Server anpassen ({selectedMod.compatibleVersions?.[0] || "1.20.1"})
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* MOD SPECIFIC DYNAMIC UPDATER PLATFORM */}
+        <div className="bg-[#121216] border border-[#24242a] rounded-xl p-5 space-y-4">
+          <div className="flex justify-between items-center border-b border-neutral-850 pb-2">
+            <div className="flex items-center gap-2">
+              <RefreshCw className="w-4 h-4 text-indigo-400" />
+              <span className="text-xxs font-bold uppercase tracking-wider text-white">Integrierter Mod-Updater</span>
+            </div>
+            <span className="text-[10px] text-neutral-450 font-mono">Engine v2.0</span>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-neutral-300">Installierte Version: <strong className="font-mono text-white">{selectedMod.version}</strong></span>
+                {selectedMod.updateAvailable && (
+                  <span className="bg-amber-950/40 text-amber-400 border border-amber-900/50 px-2 py-0.5 rounded text-[9px] font-mono uppercase tracking-wide">
+                    Update verfügbar ({selectedMod.latestVersion})
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-neutral-550 leading-relaxed">
+                {selectedMod.updateAvailable 
+                  ? "Sicherheits- und Stabilitätspatches in neuer Version enthalten. Ein sicheres Update wird dringend empfohlen."
+                  : "Diese Modifikation ist auf dem absolut neuesten Stand der Online-Repositories."}
+              </p>
+            </div>
+
+            {selectedMod.updateAvailable && selectedMod.installed && (
+              <div className="flex-shrink-0">
+                {updatingModId === selectedMod.id ? (
+                  <div className="w-36 space-y-1.5 text-right">
+                    <div className="flex justify-between text-[10px] font-mono text-neutral-450">
+                      <span>Aktualisiere...</span>
+                      <span>{updateProgress}%</span>
+                    </div>
+                    <div className="w-full bg-neutral-950 h-1 rounded-full overflow-hidden">
+                      <div className="h-full bg-indigo-500 rounded-full transition-all duration-300" style={{ width: `${updateProgress}%` }} />
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => handleUpdateMod(selectedMod)}
+                    className="bg-amber-600 hover:bg-amber-550 border border-amber-500/30 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer shadow-lg shadow-amber-600/10"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> Update einspielen
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -1292,28 +1831,111 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
               
               {/* Top Control Bar for search & viewMode switching */}
               <div className="px-6 py-4 border-b border-neutral-850/80 bg-neutral-900/10 flex flex-col md:flex-row md:items-center justify-between gap-4 flex-shrink-0">
-                <div className="flex-1 max-w-lg relative">
-                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-neutral-500">
-                    <Search className="w-4 h-4" />
-                  </span>
-                  <input
-                    type="text"
-                    value={modSearch}
-                    onChange={(e) => setModSearch(e.target.value)}
-                    placeholder="Erweiterungspakete filtern (z.B. Edit, trader, expansion...)"
-                    className="w-full bg-[#121216] border border-neutral-850 focus:border-indigo-500 rounded-xl pl-10 pr-10 py-2.5 text-xs text-white focus:outline-none placeholder:text-neutral-500 transition-all"
-                  />
-                  {modSearch && (
-                    <button
-                      onClick={() => {
-                        setModSearch("");
-                        // Simply re-fetching
-                      }}
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-neutral-400 hover:text-white cursor-pointer"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  )}
+                <div className="flex-1 max-w-lg flex flex-col gap-3">
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-grow">
+                      <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-neutral-500">
+                        {isLoadingLiveMods ? (
+                          <RefreshCw className="w-4 h-4 text-indigo-400 animate-spin" />
+                        ) : (
+                          <Search className="w-4 h-4" />
+                        )}
+                      </span>
+                      <input
+                        type="text"
+                        value={modSearch}
+                        onChange={(e) => setModSearch(e.target.value)}
+                        placeholder="Erweiterungspakete filtern (z.B. Edit, trader, expansion...)"
+                        className="w-full bg-[#121216] border border-neutral-850 focus:border-indigo-500 rounded-xl pl-10 pr-10 py-2.5 text-xs text-white focus:outline-none placeholder:text-neutral-500 transition-all"
+                      />
+                      {modSearch && (
+                        <button
+                          onClick={() => {
+                            setModSearch("");
+                          }}
+                          className="absolute inset-y-0 right-0 pr-3 flex items-center text-neutral-400 hover:text-white cursor-pointer"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Dynamic Game Spielversion Dropdown Filter */}
+                    <div className="flex items-center gap-1.5 bg-[#121216] border border-neutral-850 px-3 py-2 rounded-xl flex-shrink-0">
+                      <span className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider font-mono">Spielversion:</span>
+                      <select
+                        value={selectedVersion}
+                        onChange={(e) => {
+                          setSelectedVersion(e.target.value);
+                          setSelectedMod(null); // Reset detail selection
+                        }}
+                        className="bg-transparent border-none text-white text-xs font-bold focus:ring-0 focus:outline-none cursor-pointer font-mono outline-none"
+                      >
+                        <option value="All" className="bg-[#121216] text-white">Alle</option>
+                        {server.game === "minecraft" ? (
+                          <>
+                            <option value="1.20.4" className="bg-[#121216] text-white">1.20.4</option>
+                            <option value="1.20.1" className="bg-[#121216] text-white">1.20.1</option>
+                            <option value="1.19.4" className="bg-[#121216] text-white">1.19.4</option>
+                            <option value="1.18.2" className="bg-[#121216] text-white">1.18.2</option>
+                          </>
+                        ) : server.game === "dayz" ? (
+                          <>
+                            <option value="1.25" className="bg-[#121216] text-white">1.25</option>
+                            <option value="1.24" className="bg-[#121216] text-white">1.24</option>
+                            <option value="1.23" className="bg-[#121216] text-white">1.23</option>
+                          </>
+                        ) : (
+                          <>
+                            <option value="1.39" className="bg-[#121216] text-white">1.39</option>
+                            <option value="1.0.0" className="bg-[#121216] text-white">1.0.0</option>
+                          </>
+                        )}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Multi-source registry filter tabs (CurseForge, Steam Workshop, Modrinth, Spigot, GitHub) */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 bg-[#121216]/50 p-1.5 border border-neutral-850/80 rounded-xl">
+                    <div className="flex flex-wrap items-center gap-1">
+                      {[
+                        { id: "All", label: "Alle" },
+                        { id: "CurseForge", label: "CurseForge" },
+                        { id: "Steam Workshop", label: "Workshop" },
+                        { id: "Modrinth", label: "Modrinth" },
+                        { id: "GitHub Releases", label: "GitHub" },
+                        { id: "SpigotMC", label: "Spigot" }
+                      ].map((reg) => (
+                        <button
+                          key={reg.id}
+                          onClick={() => {
+                            setSelectedRegistry(reg.id);
+                            setSelectedMod(null); // Clear selected item to avoid state mismatches
+                          }}
+                          className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all uppercase tracking-wide cursor-pointer flex items-center gap-1 ${
+                            selectedRegistry === reg.id
+                              ? "bg-indigo-600 border border-indigo-500 text-white shadow-sm"
+                              : "bg-neutral-900/50 hover:bg-neutral-800 text-neutral-400 border border-neutral-850/50"
+                          }`}
+                        >
+                          <span className={`w-1 h-1 rounded-full ${selectedRegistry === reg.id ? "bg-white" : "bg-neutral-500"}`} />
+                          {reg.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Out of the box update available action banner */}
+                    {modsList.some((m) => m.installed && m.updateAvailable) && (
+                      <button
+                        disabled={isUpdatingAll || updatingModId !== null}
+                        onClick={handleUpdateAllMods}
+                        className="bg-amber-600 hover:bg-amber-550 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 border border-amber-500/30 transition-all cursor-pointer animate-pulse disabled:opacity-40"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${isUpdatingAll ? "animate-spin" : ""}`} />
+                        {isUpdatingAll ? "Update..." : "Alle updaten"}
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
@@ -1589,7 +2211,7 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
                       <input
                         type="text"
                         required
-                        placeholder="z.B. user_admins.txt"
+                        placeholder="z.B. config/admins.json"
                         value={newFileName}
                         onChange={(e) => setNewFileName(e.target.value)}
                         className="w-full bg-[#121216] border border-[#24242a] rounded p-1.5 text-xxs text-white focus:outline-none focus:border-indigo-505"
@@ -1612,34 +2234,21 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
                     </form>
                   )}
 
-                  {/* Files scroller loop */}
-                  <div className="flex-1 overflow-y-auto space-y-1.5 scroller pr-1">
-                    {filesList.map((file) => {
-                      const isSelected = selectedFile?.name === file.name;
-                      const extension = file.name.split(".").pop() || "txt";
-
-                      return (
-                        <button
-                          key={file.name}
-                          onClick={() => handleSelectFile(file)}
-                          className={`w-full text-left p-2 rounded-lg flex items-center justify-between border transition-all cursor-pointer ${
-                            isSelected
-                              ? "bg-indigo-950/20 border-indigo-500/40 text-white"
-                              : "bg-[#121216]/60 border-transparent text-neutral-450 hover:bg-neutral-900/40 hover:text-white"
-                          }`}
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            {extension === "cfg" || extension === "properties" || extension === "json" ? (
-                              <FileCode className="w-4 h-4 text-indigo-400 flex-shrink-0" />
-                            ) : (
-                              <FileText className="w-4 h-4 text-neutral-500 flex-shrink-0" />
-                            )}
-                            <span className="text-xxs font-medium font-mono truncate tracking-tight">{file.name}</span>
-                          </div>
-                          <span className="text-[9px] text-neutral-600 font-mono flex-shrink-0">{file.size}</span>
-                        </button>
-                      );
-                    })}
+                  {/* Files scroller loop: Collapsible Subfolder Tree Hierachie */}
+                  <div className="flex-1 overflow-y-auto space-y-2 scroller pr-1">
+                    {filesList.length === 0 ? (
+                      <p className="text-xxs text-neutral-500 font-mono p-3 text-center">Keine Dateien vorhanden.</p>
+                    ) : (
+                      <FileExplorerTree
+                        nodes={buildFolderTree(filesList)}
+                        selectedFile={selectedFile}
+                        expandedFolders={expandedFolders}
+                        onToggleFolder={toggleFolder}
+                        onSelectFile={handleSelectFile}
+                        onDeletePath={handleDeletePath}
+                        accentColor="indigo"
+                      />
+                    )}
                   </div>
                 </div>
 
@@ -1671,18 +2280,18 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
               </div>
 
               {/* Right pane: Config Code Editor */}
-              <div className="flex-1 flex flex-col justify-between overflow-hidden">
+              <div className="flex-1 flex flex-col justify-between overflow-hidden text-left bg-[#121216]">
                 {selectedFile ? (
                   <div className="flex-1 flex flex-col overflow-hidden">
 
                     {/* Editor top meta */}
-                    <div className="px-5 py-3 border-b border-neutral-850/80 bg-neutral-950/40 flex justify-between items-center flex-shrink-0">
+                    <div className="px-5 py-3 border-b border-neutral-850/80 bg-neutral-950/45 flex justify-between items-center flex-shrink-0">
                       <div>
-                        <span className="text-xxs font-mono text-indigo-400">PATH: /volumes/{server.id}/{selectedFile.name}</span>
+                        <span className="text-xxs font-mono text-indigo-400">PATH: /volumes/{server.id}/{selectedFile.path}</span>
                         <h4 className="font-bold text-white text-xs mt-0.5 tracking-wide font-mono">{selectedFile.name}</h4>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-neutral-500 font-mono font-bold uppercase select-none mr-2">Size: {selectedFile.size}</span>
+                        <span className="text-[10px] text-neutral-500 font-mono font-bold uppercase select-none mr-2">Größe: {selectedFile.size}</span>
 
                         <button
                           onClick={handleSaveFileContent}
@@ -1695,22 +2304,173 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
                       </div>
                     </div>
 
-                    {/* Editor Body */}
-                    <div className="flex-1 flex relative overflow-hidden bg-black/95">
-                      <div className="w-10 bg-neutral-950 border-r border-neutral-900 font-mono text-center text-neutral-600 text-[10px] select-none pt-4 space-y-1">
-                        {Array.from({ length: Math.max(12, editorContent.split("\n").length) }).map((_, i) => (
-                          <div key={i}>{i + 1}</div>
-                        ))}
+                    {/* Mode selector tab for Datatypes & Form views */}
+                    {selectedFile && getFileDataTypeInfo(selectedFile.name).isConfigurable && (
+                      <div className="px-5 py-2 border-b border-neutral-900 bg-neutral-950/20 flex justify-between items-center text-zinc-400 flex-shrink-0 select-none">
+                        <div className="flex bg-[#121216] p-1 rounded-lg border border-neutral-850">
+                          <button
+                            type="button"
+                            onClick={() => setEditorMode("code")}
+                            className={`px-3 py-1 rounded text-[10px] font-mono font-bold uppercase transition flex items-center gap-1.5 cursor-pointer ${
+                              editorMode === "code"
+                                ? "bg-indigo-950/30 text-indigo-400 border border-indigo-900/30"
+                                : "hover:text-white"
+                            }`}
+                          >
+                            <FileCode className="w-3.5 h-3.5 animate-pulse-slow" /> Code-Editor (Raw)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleParseVisualConfig(editorContent, selectedFile.name);
+                              setEditorMode("visual");
+                            }}
+                            className={`px-3 py-1 rounded text-[10px] font-mono font-bold uppercase transition flex items-center gap-1.5 cursor-pointer ${
+                              editorMode === "visual"
+                                ? "bg-indigo-950/30 text-indigo-400 border border-indigo-900/30"
+                                : "hover:text-white"
+                            }`}
+                          >
+                            <Sliders className="w-3.5 h-3.5" /> Parameter-Formular (Visual)
+                          </button>
+                        </div>
+                        
+                        <div className="text-[10px] font-mono text-neutral-500 flex items-center gap-1.5">
+                          <Check className="w-3.5 h-3.5 text-indigo-400/80" /> Datentyp validiert
+                        </div>
                       </div>
+                    )}
 
-                      <textarea
-                        value={editorContent}
-                        onChange={(e) => setEditorContent(e.target.value)}
-                        className="flex-1 bg-transparent border-0 focus:ring-0 text-white font-mono text-xs p-4 leading-relaxed focus:outline-none resize-none scroller h-full select-text selection:bg-indigo-500/40"
-                        placeholder="# Schreiben Sie Ihre Konfiguration hier rein..."
-                        spellCheck={false}
-                      />
-                    </div>
+                    {/* Editor Body */}
+                    {editorMode === "visual" && getFileDataTypeInfo(selectedFile.name).isConfigurable ? (
+                      <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-black/55 scroller select-text">
+                        <div className="bg-[#121216]/60 border border-neutral-850 p-4 rounded-xl space-y-2 text-left">
+                          <h4 className="text-xs font-bold text-neutral-300 uppercase tracking-wider flex items-center gap-2 select-none">
+                            <Sparkles className="w-4 h-4 text-indigo-400 animate-bounce" />
+                            Visual Configurator — Datentyp: {getFileDataTypeInfo(selectedFile.name).label}
+                          </h4>
+                          <p className="text-[11px] text-neutral-500 leading-normal">
+                            Dieser Konfigurator parst den Datei-Payload von <strong>{selectedFile.name}</strong> automatisch als strukturiertes Schema. 
+                            Verändern Sie Parameterwerte direkt über interaktive Formularfelder. Änderungen werden automatisch in das Codebuilding-Format zurückgeschrieben.
+                          </p>
+                        </div>
+
+                        {visualConfigData.length === 0 ? (
+                          <div className="p-8 border border-neutral-850 rounded-xl text-center text-neutral-600 bg-neutral-900/10">
+                            <Sliders className="w-8 h-8 text-neutral-700 mx-auto mb-2" />
+                            <span className="text-xs">Keine konfigurierbaren Parameter im parsbaren Codebereich identifiziert.</span>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {visualConfigData.map((item, index) => {
+                              const isBool = item.type === "boolean";
+                              const isNum = item.type === "number";
+
+                              return (
+                                <div key={`${item.key}-${index}`} className="p-3 bg-neutral-900/40 border border-neutral-850 rounded-lg flex flex-col justify-between hover:border-neutral-800 transition-colors">
+                                  <div className="flex items-center justify-between mb-1.5 min-w-0 select-none">
+                                    <span className="font-mono text-[10.5px] font-extrabold text-[#9da5b4] truncate uppercase tracking-wide mr-1.5 select-all" title={item.key}>
+                                      {item.key}
+                                    </span>
+                                    <span className="text-[7.5px] px-1 font-mono uppercase bg-neutral-950 text-neutral-600 rounded border border-neutral-850">
+                                      {item.type}
+                                    </span>
+                                  </div>
+
+                                  <div className="mt-1 flex items-center">
+                                    {isBool ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUpdateVisualValue(index, item.value === true || item.value === "true" ? "false" : "true")}
+                                        className={`px-3 py-1 rounded text-xxs font-mono font-bold transition-all cursor-pointer ${
+                                          item.value === true || item.value === "true"
+                                            ? "bg-emerald-990/40 text-emerald-405 border border-emerald-900/40"
+                                            : "bg-red-990/45 text-red-405 border border-red-950/40"
+                                        }`}
+                                      >
+                                        {(item.value === true || item.value === "true") ? "TRUE (Aktiv)" : "FALSE (Inaktiv)"}
+                                      </button>
+                                    ) : (
+                                      <input
+                                        type={isNum ? "number" : "text"}
+                                        value={item.value}
+                                        onChange={(e) => handleUpdateVisualValue(index, e.target.value)}
+                                        className="w-full bg-[#121216] border border-neutral-800 focus:border-indigo-505 rounded px-2 py-1 text-xxs font-mono text-white focus:outline-none"
+                                      />
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Add Parameter form */}
+                        <div className="bg-[#121216]/50 border border-neutral-850/70 rounded-xl p-4 mt-4 select-none text-left">
+                          <h5 className="text-[10px] uppercase font-mono font-bold tracking-wider text-[#9da5b4] mb-3 flex items-center gap-1.5">
+                            <Plus className="w-3.5 h-3.5 text-indigo-400" /> Neuen Parameter injizieren
+                          </h5>
+                          <form onSubmit={handleAddVisualParam} className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 items-end">
+                            <div>
+                              <label className="block text-[8.5px] uppercase text-neutral-550 font-mono mb-1">Schlüssel (Key)</label>
+                              <input
+                                type="text"
+                                required
+                                placeholder="z.B. max_tick_rate"
+                                value={newParamKey}
+                                onChange={(e) => setNewParamKey(e.target.value)}
+                                className="w-full bg-neutral-900 border border-neutral-800 rounded p-1.5 text-xxs font-mono text-white focus:outline-none focus:border-indigo-505"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[8.5px] uppercase text-neutral-550 font-mono mb-1">Standardwert (Value)</label>
+                              <input
+                                type="text"
+                                required
+                                placeholder="z.B. 64"
+                                value={newParamVal}
+                                onChange={(e) => setNewParamVal(e.target.value)}
+                                className="w-full bg-neutral-900 border border-neutral-800 rounded p-1.5 text-xxs font-mono text-white focus:outline-none focus:border-indigo-505"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[8.5px] uppercase text-neutral-550 font-mono mb-1">Datentyp</label>
+                              <select
+                                value={newParamType}
+                                onChange={(e) => setNewParamType(e.target.value as any)}
+                                className="w-full bg-neutral-900 border border-neutral-800 rounded p-1.5 text-xxs font-mono text-white focus:outline-none focus:border-indigo-505 cursor-pointer"
+                              >
+                                <option value="text">String (Text)</option>
+                                <option value="boolean">Boolean (Toggle)</option>
+                                <option value="number">Numeric (Zahl)</option>
+                              </select>
+                            </div>
+                            <button
+                              type="submit"
+                              className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xxs py-1.8 px-3 rounded-lg flex items-center justify-center gap-1 transition-all h-8.5 cursor-pointer shadow"
+                            >
+                              <Plus className="w-3.5 h-3.5" /> Injizieren
+                            </button>
+                          </form>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex-1 flex relative overflow-hidden bg-black/95">
+                        <div className="w-10 bg-neutral-950 border-r border-neutral-900 font-mono text-center text-neutral-600 text-[10px] select-none pt-4 space-y-1">
+                          {Array.from({ length: Math.max(12, editorContent.split("\n").length) }).map((_, i) => (
+                            <div key={i}>{i + 1}</div>
+                          ))}
+                        </div>
+
+                        <textarea
+                          value={editorContent}
+                          onChange={(e) => setEditorContent(e.target.value)}
+                          className="flex-1 bg-transparent border-0 focus:ring-0 text-white font-mono text-xs p-4 leading-relaxed focus:outline-none resize-none scroller h-full select-text selection:bg-indigo-500/40"
+                          placeholder="# Schreiben Sie Ihre Konfiguration hier rein..."
+                          spellCheck={false}
+                        />
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
@@ -1734,7 +2494,7 @@ export default function ServerModsManager({ server, onClose, onAddConsoleLog }: 
             <span>•</span>
             <span className="flex items-center gap-1.5 border border-indigo-900/50 px-2 py-0.5 rounded bg-indigo-950/25"><Cpu className="w-3 h-3 text-indigo-400" /> API: Live sync</span>
           </div>
-          <span className="text-indigo-450 uppercase">Kilians Spielwiese Workshop Core 2.0-STABLE</span>
+          <span className="text-indigo-450 uppercase">Gameserver Labor Workshop Core 2.0-STABLE</span>
         </div>
 
     </FloatingWindow>

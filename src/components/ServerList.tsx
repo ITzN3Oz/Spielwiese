@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { GameServer, ServerLog } from "../types";
+import { useLanguage } from "../LanguageContext";
 import {
   Play,
   Square,
@@ -22,7 +23,8 @@ import {
   Compass,
   Hammer,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Activity
 } from "lucide-react";
 import ServerModsManager from "./ServerModsManager";
 import GameIcon from "./GameIcon";
@@ -47,11 +49,16 @@ export default function ServerList({
   onCreateBackup,
   accentColor = "indigo"
 }: ServerListProps) {
+  const { t } = useLanguage();
   const [activeConsoleServer, setActiveConsoleServer] = useState<GameServer | null>(null);
   const [consoleLogs, setConsoleLogs] = useState<ServerLog[]>([]);
   const [consoleInput, setConsoleInput] = useState("");
+  const [consoleSearchQuery, setConsoleSearchQuery] = useState("");
   const [activeSettingsServer, setActiveSettingsServer] = useState<GameServer | null>(null);
   const [activeModsServer, setActiveModsServer] = useState<GameServer | null>(null);
+  // 'Verlauf'-Tab tracking state variables
+  const [consoleTab, setConsoleTab] = useState<"terminal" | "history">("terminal");
+  const [serverHistory, setServerHistory] = useState<any[]>([]);
 
   // Help guides & Game Launcher states
   const [activeGuidesServer, setActiveGuidesServer] = useState<GameServer | null>(null);
@@ -103,6 +110,9 @@ export default function ServerList({
   const [settingsAutoUpdate, setSettingsAutoUpdate] = useState(true);
   const [settingsAutoBackup, setSettingsAutoBackup] = useState(true);
   const [settingsVars, setSettingsVars] = useState<Record<string, string>>({});
+  const [settingsCpuLimit, setSettingsCpuLimit] = useState(100);
+  const [settingsOomRestart, setSettingsOomRestart] = useState(true);
+  const [settingsDiskThrottle, setSettingsDiskThrottle] = useState(50);
 
   const logsEndRef = useRef<HTMLDivElement>(null);
 
@@ -130,6 +140,30 @@ export default function ServerList({
     return () => clearInterval(intervalId);
   }, [activeConsoleServer]);
 
+  // Fetch chronological event status history periodically when the 'Verlauf' tab is active
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+    if (activeConsoleServer && consoleTab === "history") {
+      const fetchHistory = async () => {
+        try {
+          const res = await fetch(`/api/servers/${activeConsoleServer.id}/history`);
+          if (res.ok) {
+            const data = await res.json();
+            setServerHistory(data);
+          }
+        } catch (err) {
+          console.error("Failed to load history dynamically", err);
+        }
+      };
+
+      fetchHistory();
+      intervalId = setInterval(fetchHistory, 3000);
+    } else {
+      setServerHistory([]);
+    }
+    return () => clearInterval(intervalId);
+  }, [activeConsoleServer, consoleTab]);
+
   // Scroll console screen to help read commands
   useEffect(() => {
     if (logsEndRef.current) {
@@ -139,11 +173,30 @@ export default function ServerList({
 
   const openConsole = (srv: GameServer) => {
     setActiveConsoleServer(srv);
+    setConsoleSearchQuery("");
   };
 
   const closeConsole = () => {
     setActiveConsoleServer(null);
     setIsConsoleMaximized(false);
+    setConsoleSearchQuery("");
+    setConsoleTab("terminal");
+  };
+
+  const downloadConsoleLogs = () => {
+    if (!activeConsoleServer) return;
+    const logContent = consoleLogs
+      .map(log => `[${new Date(log.timestamp).toISOString()}] [${log.type.toUpperCase()}] ${log.message}`)
+      .join("\n");
+    const blob = new Blob([logContent], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `server_${activeConsoleServer.id}_console_logs.log`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const sendConsoleCommand = async (e: React.FormEvent) => {
@@ -193,7 +246,7 @@ export default function ServerList({
     switch (gameKey) {
       case "minecraft":
         return [
-          { label: "👑 OP Kilian duchschnittlich", cmd: "op Kilian" },
+          { label: "👑 OP Admin", cmd: "op Admin" },
           { label: "☀️ Zeit auf Tag setzen", cmd: "time set day" },
           { label: "🌙 Zeit auf Nacht setzen", cmd: "time set night" },
           { label: "☔ Regen klären (Wetter)", cmd: "weather clear" },
@@ -253,6 +306,9 @@ export default function ServerList({
     setSettingsAutoUpdate(srv.autoUpdate);
     setSettingsAutoBackup(srv.autoBackup);
     setSettingsVars({ ...srv.variables });
+    setSettingsCpuLimit(srv.cpuLimit !== undefined ? srv.cpuLimit : 100);
+    setSettingsOomRestart(srv.oomRestart !== undefined ? srv.oomRestart : true);
+    setSettingsDiskThrottle(srv.diskThrottle !== undefined ? srv.diskThrottle : 50);
   };
 
   const closeSettings = () => {
@@ -271,7 +327,10 @@ export default function ServerList({
       maxPlayers: Number(settingsPlayers),
       autoUpdate: settingsAutoUpdate,
       autoBackup: settingsAutoBackup,
-      variables: settingsVars
+      variables: settingsVars,
+      cpuLimit: Number(settingsCpuLimit),
+      oomRestart: settingsOomRestart,
+      diskThrottle: Number(settingsDiskThrottle)
     });
 
     closeSettings();
@@ -374,11 +433,18 @@ export default function ServerList({
 
                 {/* Card Top */}
                 <div className="flex justify-between items-start">
-                  <div className="flex gap-3">
-                    <GameIcon game={srv.game} className="w-11 h-11 flex-shrink-0" iconUrl={srv.iconUrl} />
+                  <div 
+                    onClick={() => setActiveModsServer(srv)}
+                    className="cursor-pointer group flex items-start gap-3"
+                    title="Server Detailansicht & Mod-Hub öffnen"
+                  >
+                    <GameIcon game={srv.game} className="w-11 h-11 flex-shrink-0 group-hover:scale-105 transition-all" iconUrl={srv.iconUrl} />
                     <div>
-                      <h4 className="font-bold text-white text-sm tracking-wide">{srv.name}</h4>
-                      <p className="text-[10px] text-neutral-500 mt-1 font-mono tracking-tight truncate max-w-[185px] sm:max-w-[220px]">
+                      <h4 className="font-bold text-white text-sm tracking-wide group-hover:text-indigo-400 transition-colors flex items-center gap-1.5">
+                        {srv.name}
+                        <Puzzle className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-all text-indigo-400" />
+                      </h4>
+                      <p className="text-[10px] text-neutral-500 mt-1 font-mono tracking-tight truncate max-w-[170px] sm:max-w-[200px]">
                         {srv.dockerImage}
                       </p>
                     </div>
@@ -392,27 +458,58 @@ export default function ServerList({
                   </div>
                 </div>
 
-                {/* Card Middle: Usage stats inline display */}
-                <div className="my-5 grid grid-cols-3 gap-2.5">
-                  <div className="bg-neutral-950/50 border border-neutral-850 p-2 rounded-lg text-center">
-                    <p className="text-[9px] text-neutral-500 font-bold uppercase tracking-wide">CPU Last</p>
-                    <p className="text-white font-mono text-sm font-bold mt-1">
-                      {isRunning ? `${srv.cpuUsage}%` : "0%"}
-                    </p>
+                {/* Card Middle: Usage stats inline display OR Installation/Updating Progress Bar */}
+                {!isPending ? (
+                  <div className="my-5 grid grid-cols-3 gap-2.5">
+                    <div className="bg-neutral-950/50 border border-neutral-850 p-2 rounded-lg text-center">
+                      <p className="text-[9px] text-neutral-500 font-bold uppercase tracking-wide">CPU Last</p>
+                      <p className="text-white font-mono text-sm font-bold mt-1">
+                        {isRunning ? `${srv.cpuUsage}%` : "0%"}
+                      </p>
+                    </div>
+                    <div className="bg-neutral-950/50 border border-neutral-850 p-2 rounded-lg text-center">
+                      <p className="text-[9px] text-neutral-500 font-bold uppercase tracking-wide">RAM Auslastung</p>
+                      <p className="text-white font-mono text-sm font-bold mt-1">
+                        {isRunning ? `${(srv.memoryUsage / 1024).toFixed(1)} GB` : "0.0 GB"}
+                      </p>
+                    </div>
+                    <div className="bg-neutral-950/50 border border-neutral-850 p-2 rounded-lg text-center">
+                      <p className="text-[9px] text-neutral-500 font-bold uppercase tracking-wide">Mitglieder</p>
+                      <p className="text-white font-mono text-sm font-bold mt-1">
+                        {isRunning ? `${srv.activePlayers} / ${srv.maxPlayers}` : `0 / ${srv.maxPlayers}`}
+                      </p>
+                    </div>
                   </div>
-                  <div className="bg-neutral-950/50 border border-neutral-850 p-2 rounded-lg text-center">
-                    <p className="text-[9px] text-neutral-500 font-bold uppercase tracking-wide">RAM Auslastung</p>
-                    <p className="text-white font-mono text-sm font-bold mt-1">
-                      {isRunning ? `${(srv.memoryUsage / 1024).toFixed(1)} GB` : "0.0 GB"}
-                    </p>
+                ) : (
+                  /* 'Installation-Progress' visual progress bar suite */
+                  <div className="my-5 bg-neutral-950/60 p-4 rounded-xl border border-neutral-850 space-y-3.5">
+                    <div className="flex justify-between items-center text-[10px] font-mono leading-none">
+                      <span className="text-amber-500 font-bold animate-pulse flex items-center gap-1">
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
+                        {srv.status === "installing" ? "INSTALLIERE..." : "AKTUALISIERE..."}
+                      </span>
+                      <span className="text-white font-bold">{srv.installProgress || 0}%</span>
+                    </div>
+
+                    <div className="w-full bg-neutral-900 h-2 rounded-full overflow-hidden border border-neutral-850">
+                      <div
+                        className="h-full bg-gradient-to-r from-amber-500 to-indigo-500 rounded-full transition-all duration-500 ease-out animate-pulse"
+                        style={{ width: `${srv.installProgress || 0}%` }}
+                      ></div>
+                    </div>
+
+                    <div className="space-y-1 font-mono text-[9px] leading-tight text-neutral-400">
+                      <div className="flex justify-between">
+                        <span>Schritt:</span>
+                        <span className="text-neutral-200 truncate max-w-[190px]">{srv.installStage || "Initialisiere Warteschleife..."}</span>
+                      </div>
+                      <div className="flex justify-between text-neutral-500 uppercase tracking-wider text-[8px] pt-1">
+                        <span>Speed: ~45.2 MB/s</span>
+                        <span>SteamCMD Cloud</span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="bg-neutral-950/50 border border-neutral-850 p-2 rounded-lg text-center">
-                    <p className="text-[9px] text-neutral-500 font-bold uppercase tracking-wide">Mitglieder</p>
-                    <p className="text-white font-mono text-sm font-bold mt-1">
-                      {isRunning ? `${srv.activePlayers} / ${srv.maxPlayers}` : `0 / ${srv.maxPlayers}`}
-                    </p>
-                  </div>
-                </div>
+                )}
 
                 {/* Progress bar info for RAM */}
                 {isRunning && (
@@ -562,11 +659,11 @@ export default function ServerList({
                     <Database className="w-3.5 h-3.5 text-emerald-500" />
                   </button>
 
-                  {/* Mods & Dateimanager button */}
+                  {/* Mods & Dateimanager button / Mod-Hub */}
                   <button
                     onClick={() => setActiveModsServer(srv)}
-                    className="bg-neutral-855 hover:bg-neutral-800 border-indigo-900/40 hover:border-indigo-505/40 border p-1.5 rounded-lg text-indigo-400 transition-colors cursor-pointer"
-                    title="Mods & Dateimanager"
+                    className="bg-indigo-950/20 hover:bg-indigo-950/40 border border-indigo-500/30 hover:border-indigo-550/50 p-1.5 rounded-lg text-indigo-400 transition-colors cursor-pointer"
+                    title="Mod-Hub: CurseForge/Modrinth Mods suchen & direkt installieren"
                   >
                     <Puzzle className="w-3.5 h-3.5" />
                   </button>
@@ -574,13 +671,16 @@ export default function ServerList({
                   {/* Uninstall container */}
                   <button
                     onClick={() => {
-                      if (confirm(`Sind Sie sicher, dass Sie '${srv.name}' löschen und uninstalleiren wollen?`)) {
+                      const warningMsg = isRunning
+                        ? `ACHTUNG: Der Server '${srv.name}' ist AKTIV und läuft zurzeit.\n\nDurch das Deinstallieren wird dieser laufende Container auf Ihrem Linux-System hart gestoppt und unwiderruflich aus Docker entfernt. Alle nicht gesicherten Spieldaten gehen verloren!\n\nMöchten Sie wirklich fortfahren?`
+                        : `Sind Sie sicher, dass Sie '${srv.name}' löschen und deinstallieren wollen? Alle zugehörigen Volumes, Docker-Container und Lokale-Konfigurationen werden unwiderruflich entfernt.`;
+                      
+                      if (confirm(warningMsg)) {
                         onDeleteServer(srv.id);
                       }
                     }}
-                    disabled={isRunning}
-                    className="bg-neutral-800 hover:bg-red-950/50 hover:text-red-400 disabled:opacity-30 border border-neutral-700 hover:border-red-900/20 p-1.5 rounded-lg text-neutral-500 transition-colors ml-auto"
-                    title="Server deinstallieren (Nur im gestoppten Zustand)"
+                    className="bg-neutral-800 hover:bg-red-950/50 hover:text-red-400 border border-neutral-700 hover:border-red-900/20 p-1.5 rounded-lg text-neutral-500 transition-colors ml-auto cursor-pointer"
+                    title={isRunning ? "Server stoppen und deinstallieren" : "Server deinstallieren"}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -595,24 +695,85 @@ export default function ServerList({
       {activeConsoleServer && (
         <FloatingWindow
           onClose={closeConsole}
-          title={`Echtzeit-Terminal für ${activeConsoleServer.name}`}
-          subtitle="[Kilians Core CLI Container Sync Engine v2.0] • RCON ACTIVE"
+          title={`${t("servers.terminalTitle", "Echtzeit-Terminal für")} ${activeConsoleServer.name}`}
+          subtitle="[Gameserver Labor CLI Container Sync Engine v2.0] • RCON ACTIVE"
           icon={<Terminal className="w-5 h-5 text-indigo-400" />}
           initialWidth={950}
           initialHeight={620}
         >
-          {/* Split Screen Container */}
-          <div className="flex-1 flex overflow-hidden">
+          {/* Tabs header for Terminal vs. Event History */}
+          <div className="bg-[#101014] border-b border-neutral-900 px-5 flex items-center gap-1 select-none">
+            <button
+              type="button"
+              onClick={() => setConsoleTab("terminal")}
+              className={`px-4 py-3 text-[11px] font-bold tracking-wider uppercase border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+                consoleTab === "terminal"
+                  ? "text-indigo-400 border-indigo-500 bg-[#161622]/40"
+                  : "text-neutral-500 border-transparent hover:text-neutral-300"
+              }`}
+            >
+              <Terminal className="w-3.5 h-3.5" />
+              Echtzeit-Terminal (RCON CLI)
+            </button>
+            <button
+              type="button"
+              onClick={() => setConsoleTab("history")}
+              className={`px-4 py-3 text-[11px] font-bold tracking-wider uppercase border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+                consoleTab === "history"
+                  ? "text-indigo-400 border-indigo-505 bg-[#161622]/40"
+                  : "text-neutral-500 border-transparent hover:text-neutral-300"
+              }`}
+            >
+              <Activity className="w-3.5 h-3.5" />
+              Ereignis-Verlauf (Status-Logs)
+            </button>
+          </div>
+
+          {consoleTab === "terminal" ? (
+            /* Split Screen Container */
+            <div className="flex-1 flex overflow-hidden">
               
             {/* Left Pane - Terminal Scrolling Stream */}
             <div className="flex-1 flex flex-col justify-between bg-black/95">
-              <div className="flex-1 p-5 overflow-y-auto font-mono text-xs text-neutral-300 space-y-2 select-text scroller">
+              
+              {/* Dynamic Filter and Download Sub-Bar */}
+              <div className="bg-[#121216] border-b border-neutral-900 px-4 py-2 flex items-center justify-between gap-3 text-xs select-none">
+                <div className="flex items-center gap-2 flex-grow max-w-md">
+                  <span className="text-zinc-500 font-mono text-[10px] uppercase font-bold">Filter:</span>
+                  <input
+                    type="text"
+                    value={consoleSearchQuery}
+                    onChange={(e) => setConsoleSearchQuery(e.target.value)}
+                    placeholder="Log-Zeilen filtern... (z.B. warn, error)"
+                    className="flex-grow bg-[#0c0c14] border border-neutral-800 rounded px-2.5 py-1 text-xxs font-mono text-neutral-300 outline-none focus:border-indigo-500 focus:ring-0"
+                  />
+                  {consoleSearchQuery && (
+                    <button
+                      onClick={() => setConsoleSearchQuery("")}
+                      className="text-[#f43f5e] hover:text-red-400 font-mono text-[9px] uppercase tracking-wider cursor-pointer"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={downloadConsoleLogs}
+                  className="bg-[#1c1c24] hover:bg-neutral-800 text-indigo-400 hover:text-indigo-300 border border-neutral-800 rounded px-3 py-1.5 text-[10px] font-mono leading-none tracking-wide flex items-center gap-1 cursor-pointer transition-all active:scale-95"
+                >
+                  LOGS DOWNLOADEN (.LOG)
+                </button>
+              </div>
+
+              <div className="flex-grow p-5 overflow-y-auto font-mono text-xs text-neutral-300 space-y-2 select-text scroller">
                 <div className="text-neutral-600 text-xxs border-b border-neutral-900 pb-2 flex justify-between">
-                  <span>[Kilians Core CLI Container Sync Engine v2.0]</span>
+                  <span>[Gameserver Labor CLI Container Sync Engine v2.0]</span>
                   <span>Session: UTC Live</span>
                 </div>
                 
-                {consoleLogs.map((log) => {
+                {consoleLogs
+                  .filter((log) => !consoleSearchQuery.trim() || log.message.toLowerCase().includes(consoleSearchQuery.toLowerCase()))
+                  .map((log) => {
                   const isCmdOut = log.type === "output";
                   const isErr = log.type === "error";
                   const isWarning = log.type === "warn";
@@ -709,6 +870,103 @@ export default function ServerList({
             </div>
 
           </div>
+          ) : (
+            /* 'Verlauf' (History) Tab chronological visualizer component */
+            <div className="flex-1 flex flex-col bg-[#0c0c0f] overflow-y-auto p-6 scroller select-none">
+              <div className="bg-[#121217] border border-neutral-850 rounded-xl p-5 mb-6 flex justify-between items-center">
+                <div>
+                  <h4 className="font-bold text-white text-xs tracking-wider uppercase font-mono">
+                    ⏱️ Chronologischer Aktivitäts- &amp; Warteschlangen-Verlauf
+                  </h4>
+                  <p className="text-neutral-500 text-xxs mt-1 leading-relaxed">
+                    Protokolliert detaillierte Docker Pull-Schritte, SteamCMD Updates und Container-Statuswechsel zur besseren Fehleranalyse von Warteschlangen-Szenarien.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const res = await fetch(`/api/servers/${activeConsoleServer.id}/history`);
+                    if (res.ok) {
+                      setServerHistory(await res.json());
+                    }
+                  }}
+                  className="bg-[#1c1c24] hover:bg-neutral-800 text-indigo-400 font-mono border border-neutral-800 text-xxs rounded px-3 py-1.5 cursor-pointer flex items-center gap-1.5 transition-colors"
+                >
+                  <RefreshCw className="w-3 h-3 animate-spin duration-1000" />
+                  Aktualisieren
+                </button>
+              </div>
+
+              {/* History Timeline layout */}
+              <div className="space-y-4 max-w-3xl">
+                {serverHistory.length === 0 ? (
+                  <div className="text-center py-12 border border-dashed border-neutral-800 rounded-xl bg-black/20">
+                    <p className="text-xs text-neutral-500 font-mono text-zinc-400">Keine Log-Ereignisse im Systemverlauf erfasst.</p>
+                    <p className="text-[10px] text-neutral-600 mt-1">Statusänderungen oder Installationen werden hier aufgezeichnet.</p>
+                  </div>
+                ) : (
+                  [...serverHistory]
+                    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()) // Newest first
+                    .map((item, idx) => {
+                      const isStart = item.type === "start";
+                      const isStop = item.type === "stop";
+                      const isError = item.type === "error" || item.type?.includes("fail");
+                      const isUpdate = item.type === "update" || item.type === "update_complete";
+                      const isProgress = item.type === "install_progress";
+
+                      let iconColor = "bg-neutral-900 border-neutral-850 text-neutral-400";
+                      if (isStart) iconColor = "bg-emerald-950/40 border-emerald-500/30 text-emerald-400";
+                      if (isStop) iconColor = "bg-red-952/15 border-red-500/20 text-red-500";
+                      if (isError) iconColor = "bg-amber-952/15 border-amber-500/20 text-amber-500";
+                      if (isUpdate) iconColor = "bg-purple-952/15 border-purple-500/25 text-purple-400";
+                      if (isProgress) iconColor = "bg-indigo-952/15 border-indigo-500/25 text-indigo-400";
+
+                      return (
+                        <div key={item.id || idx} className="flex gap-4 items-start relative pl-1.5">
+                          {/* Chronological Connector Line between bubbles */}
+                          {idx !== serverHistory.length - 1 && (
+                            <div className="absolute top-8 bottom-0 left-[21px] w-0.5 bg-neutral-900" />
+                          )}
+                          
+                          {/* Bubble containing event indicator icon */}
+                          <div className={`w-9 h-9 rounded-full border flex items-center justify-center flex-shrink-0 font-bold text-xs ${iconColor} select-none`}>
+                            {isStart ? "▶" : isStop ? "■" : isUpdate ? "↻" : isProgress ? "↓" : "ℹ"}
+                          </div>
+
+                          <div className="bg-[#121217] border border-neutral-850 hover:border-neutral-800 rounded-xl p-4 flex-1">
+                            <div className="flex justify-between items-start gap-4">
+                              <span className="font-semibold text-neutral-200 text-xs leading-relaxed font-mono select-all text-neutral-200">
+                                {item.message}
+                              </span>
+                              <span className="text-[10px] text-neutral-500 font-mono text-right flex-shrink-0">
+                                {new Date(item.timestamp).toLocaleTimeString("de-DE")} ({new Date(item.timestamp).toLocaleDateString("de-DE")})
+                              </span>
+                            </div>
+                            
+                            {/* Metadata Badges for Diagnostic assistance */}
+                            <div className="flex gap-2 mt-2">
+                              <span className="text-[9px] font-mono font-bold tracking-wider uppercase px-1.5 py-0.5 bg-neutral-950/80 border border-neutral-900 rounded text-zinc-500">
+                                Event: {item.type || "INFO"}
+                              </span>
+                              {isProgress && (
+                                <span className="text-[9px] font-mono font-bold tracking-wider px-1.5 py-0.5 bg-indigo-950/40 border border-indigo-900/30 rounded text-indigo-400">
+                                  Prozess-Aktivität
+                                </span>
+                              )}
+                              {isUpdate && (
+                                <span className="text-[9px] font-mono font-bold tracking-wider px-1.5 py-0.5 bg-purple-950/40 border border-purple-900/30 rounded text-purple-400">
+                                  SteamCMD System
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                )}
+              </div>
+            </div>
+          )}
         </FloatingWindow>
       )}
 
@@ -829,6 +1087,74 @@ export default function ServerList({
                 </div>
               </div>
 
+              {/* Advanced Resource Controls (Hard Limits) */}
+              <div className="space-y-4 pt-3 border-t border-neutral-850">
+                <span className="block text-xxs font-bold uppercase tracking-wider text-indigo-400 font-mono flex items-center gap-1">
+                  <Cpu className="w-3.5 h-3.5" /> HARD LIMITS &amp; RESSOURCEN-STEUERUNG
+                </span>
+
+                {/* CPU Quota slider */}
+                <div>
+                  <label className="block text-xxs font-bold uppercase tracking-wider text-neutral-450 mb-1 flex justify-between">
+                    <span>CPU-Kern-Kontingent (Max. Last)</span>
+                    <span className="text-[#d4af37] text-xs font-mono font-bold">{settingsCpuLimit}% CPU</span>
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="20"
+                      max="100"
+                      step="10"
+                      value={settingsCpuLimit}
+                      onChange={(e) => setSettingsCpuLimit(Number(e.target.value))}
+                      className="flex-1 accent-indigo-554 bg-[#1c1c24] h-1.5 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <span className="text-xs font-mono text-neutral-400 w-16 text-right">
+                      {(settingsCpuLimit / 100).toFixed(1)} Cores
+                    </span>
+                  </div>
+                </div>
+
+                {/* Disk Write Throttle slider */}
+                <div>
+                  <label className="block text-xxs font-bold uppercase tracking-wider text-neutral-450 mb-1 flex justify-between">
+                    <span>Festplatten I/O Drosselung (Write Limit)</span>
+                    <span className="text-[#d4af37] text-xs font-mono font-bold">{settingsDiskThrottle} MB/s</span>
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="10"
+                      max="500"
+                      step="10"
+                      value={settingsDiskThrottle}
+                      onChange={(e) => setSettingsDiskThrottle(Number(e.target.value))}
+                      className="flex-1 accent-indigo-554 bg-[#1c1c24] h-1.5 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <span className="text-xs font-mono text-neutral-400 w-16 text-right">
+                      {settingsDiskThrottle >= 500 ? "UNLIMITIERT" : `${settingsDiskThrottle} MB/s`}
+                    </span>
+                  </div>
+                </div>
+
+                {/* OOM Auto-Restart toggle */}
+                <div className="flex items-center justify-between bg-[#121216] p-3 rounded-lg border border-[#24242a]">
+                  <div>
+                    <p className="text-xs font-bold text-white">OOM Auto-Restart Engine</p>
+                    <p className="text-[10px] text-neutral-500 mt-0.5">Startet Container automatisch neu, falls RAM-Limit überschritten wird.</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settingsOomRestart}
+                      onChange={(e) => setSettingsOomRestart(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-neutral-900 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-neutral-450 after:border-gray-500 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                  </label>
+                </div>
+              </div>
+
               {/* Automatic routines (Automatic Updates & Backups engine) */}
               <div className="space-y-3 pt-3 border-t border-neutral-850">
                 <span className="block text-xxs font-bold uppercase tracking-wider text-neutral-450">
@@ -917,6 +1243,7 @@ export default function ServerList({
         <ServerModsManager
           server={activeModsServer}
           onClose={() => setActiveModsServer(null)}
+          onSaveConfig={onSaveConfig}
           onAddConsoleLog={async (message, type = "info") => {
             try {
               await fetch(`/api/servers/${activeModsServer.id}/command`, {

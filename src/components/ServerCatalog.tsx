@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { GameTemplate } from "../types";
 import { Server, Cpu, Layers, HardDrive, Plus, Info, Globe, Sparkles, Search, Command } from "lucide-react";
+import { useLanguage } from "../LanguageContext";
 import GameIcon from "./GameIcon";
 
 interface ServerCatalogProps {
@@ -27,7 +28,7 @@ export const GAME_TEMPLATES: GameTemplate[] = [
     recommendedRam: 4096,
     defaultVariables: {
       EULA: "TRUE",
-      MOTD: "Willkommen auf Kilians Spielwiese Minecraft-Server!",
+      MOTD: "Willkommen auf Gameserver Labor Minecraft-Server!",
       DIFFICULTY: "normal",
       TYPE: "PAPER",
       ONLINE_MODE: "true"
@@ -42,7 +43,7 @@ export const GAME_TEMPLATES: GameTemplate[] = [
     description: "Hardcore postapokalyptischer Online-Überlebenskampf. Beinhaltet vorkonfiguriertes Epoch/DayZ-Expansion System und BattlEye-Schutz.",
     recommendedRam: 8192,
     defaultVariables: {
-      SERVER_NAME: "Kilians Spielwiese DayZ Server",
+      SERVER_NAME: "Gameserver Labor DayZ Server",
       PASSWORD: "",
       ADMIN_PASSWORD: "rconSecureDayZ1",
       MAX_PLAYERS: "40",
@@ -133,7 +134,7 @@ export const GAME_TEMPLATES: GameTemplate[] = [
     description: "Kooperative Fabrikplanung aus der Ego-Perspektive. Stabiles Threading zur Vermeidung von Sync-Latenzen bei großen Konstrukten.",
     recommendedRam: 8192,
     defaultVariables: {
-      SERVER_NAME: "Kilians FICSIT Plant",
+      SERVER_NAME: "Gameserver Labor FICSIT Plant",
       MAX_PLAYERS: "10",
       LOG_LEVEL: "info"
     }
@@ -171,6 +172,7 @@ export const GAME_TEMPLATES: GameTemplate[] = [
 ];
 
 export default function ServerCatalog({ onInstall, isInstalling }: ServerCatalogProps) {
+  const { t } = useLanguage();
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<GameTemplate[]>([]);
   const [isLoadingSearch, setIsLoadingSearch] = useState(false);
@@ -321,7 +323,7 @@ export default function ServerCatalog({ onInstall, isInstalling }: ServerCatalog
       description: `Automatisch generiertes isolated Docker Volume-Setup für '${cleanName}'. Initialisiert mit SteamCMD-Diensten und Linux-Bridge Netzwerkports.`,
       recommendedRam: 6144,
       defaultVariables: {
-        SERVER_NAME: `Kilians Spielwiese ${cleanName} Server`,
+        SERVER_NAME: `Gameserver Labor ${cleanName} Server`,
         EULA: "TRUE",
         STEAM_APP_ID: "00000",
         RCON_ENABLED: "true"
@@ -370,7 +372,7 @@ export default function ServerCatalog({ onInstall, isInstalling }: ServerCatalog
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Namen des Spiels eingeben... z.B. DaZ, Minecraft, Rust, Ark, Palworld, Satisfactory..."
+            placeholder={t("catalog.searchPlaceholder", "Search games or docker images...")}
             className="w-full bg-[#121216] border border-[#24242a] rounded-lg pl-9 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-505 placeholder-neutral-550 font-sans shadow"
           />
         </div>
@@ -456,29 +458,40 @@ export default function ServerCatalog({ onInstall, isInstalling }: ServerCatalog
             </div>
           )}
 
-          {/* SECTION 2: Dynamic Web API Search results via Steam */}
+          {/* SECTION 2: Dynamic Web API Search results via Steam, GitHub & Docker Hub */}
           {searchQuery.trim().length >= 2 && (
             <div className="col-span-1 sm:col-span-2 space-y-3 pt-2">
-              <div className="flex items-center gap-1.5 border-b border-neutral-800/60 pb-1.5">
+              <div className="flex items-center gap-1.5 border-b border-neutral-800/60 pb-1.5 font-sans">
                 <Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
                 <h5 className="text-[10px] uppercase font-bold tracking-wider text-indigo-400">
-                  Gefundene Installations-Pakete im Steam Web (Echtzeit-Treffer)
+                  Gefundene Installations-Pakete im Web (Live Steam, GitHub, Docker Hub)
                 </h5>
               </div>
 
               {isLoadingSearch ? (
                 <div className="text-center py-10 bg-[#121216]/20 rounded-xl border border-[#24242a]/60">
                   <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-indigo-500 mx-auto mb-2"></div>
-                  <p className="text-[11px] text-neutral-500">Analysiere Web-Paketquellen für "{searchQuery}"...</p>
+                  <p className="text-[11px] text-neutral-500">Suche Web-Paketquellen auf Steam, GitHub & DockerHub...</p>
                 </div>
               ) : searchResults.length === 0 ? (
                 <div className="text-center py-8 bg-[#121216]/10 rounded-xl border border-neutral-850/40">
-                  <p className="text-neutral-550 text-xs">Keine Steam-Webtreffer. Nutzen Sie oben das manuelle Setup oder generieren Sie einen generisches SteamCMD-Paket.</p>
+                  <p className="text-neutral-550 text-xs font-sans">Keine Web-Dienste liefern Treffer für "{searchQuery}". Verwenden Sie oben das manuelle Setup.</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {searchResults.map((tpl) => {
                     const isSelected = !customMode && selectedTemplate?.gameKey === tpl.gameKey;
+                    const isSteam = tpl.gameKey.startsWith("steam-");
+                    const isGitHub = tpl.gameKey.startsWith("github-");
+                    const isDockerHub = tpl.gameKey.startsWith("dockerhub-");
+
+                    const badgeText = isSteam ? "STEAM DOCKER" : isGitHub ? "GITHUB REPO" : isDockerHub ? "DOCKER HUB" : "WEB DOCKED";
+                    const badgeStyle = isSteam 
+                      ? "text-indigo-400 bg-indigo-950/40 border-indigo-900/30"
+                      : isGitHub
+                        ? "text-emerald-400 bg-emerald-950/40 border-emerald-900/30"
+                        : "text-sky-400 bg-sky-950/40 border-sky-900/30";
+
                     return (
                       <button
                         key={tpl.gameKey}
@@ -492,20 +505,24 @@ export default function ServerCatalog({ onInstall, isInstalling }: ServerCatalog
                       >
                         <div>
                           <div className="flex justify-between items-start gap-4">
-                            <span className="text-[8px] font-mono text-indigo-400 bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-900/30 font-bold tracking-wider uppercase">
-                              STEAM DOCKER
+                            <span className={`text-[8px] font-mono px-1.5 py-0.5 rounded border font-bold tracking-wider uppercase ${badgeStyle}`}>
+                              {badgeText}
                             </span>
-                            <div className="w-20 h-10 overflow-hidden rounded bg-neutral-900 flex-shrink-0 border border-neutral-800">
-                              <img src={tpl.iconUrl} alt="capsule" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                            <div className="w-10 h-10 overflow-hidden rounded bg-neutral-900 flex-shrink-0 border border-neutral-800 flex items-center justify-center p-1">
+                              {tpl.iconUrl ? (
+                                <img src={tpl.iconUrl} alt="logo" referrerPolicy="no-referrer" className="w-full h-full object-contain" />
+                              ) : (
+                                <span className="text-lg">{tpl.icon || "🎲"}</span>
+                              )}
                             </div>
                           </div>
-                          <h4 className="font-bold text-white mt-1.5 text-xs tracking-wide truncate max-w-full">{tpl.name}</h4>
-                          <p className="text-neutral-400 text-[11px] mt-1.5 leading-relaxed line-clamp-2">
+                          <h4 className="font-bold text-white mt-1.5 text-xs tracking-wide truncate max-w-full font-sans">{tpl.name}</h4>
+                          <p className="text-neutral-400 text-[11px] mt-1.5 leading-relaxed line-clamp-3 font-sans">
                             {tpl.description}
                           </p>
                         </div>
 
-                        <div className="flex gap-4 mt-4 pt-3 border-t border-neutral-850 text-xxs font-mono text-neutral-550">
+                        <div className="flex gap-4 mt-4 pt-3 border-t border-neutral-855 text-xxs font-mono text-neutral-550">
                           <span className="flex items-center gap-1">
                             <Cpu className="w-3 h-3 text-indigo-400" /> {Math.round(tpl.recommendedRam / 1024)}GB Min
                           </span>

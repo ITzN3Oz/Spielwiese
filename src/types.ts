@@ -19,6 +19,11 @@ export interface GameServer {
   variables: Record<string, string>;
   created: string;
   iconUrl?: string;
+  cpuLimit?: number; // CPU limit in % (e.g., 20 - 100)
+  oomRestart?: boolean; // Auto-restart on Out Of Memory (OOM)
+  diskThrottle?: number; // Disk write limit in MB/s
+  installProgress?: number; // 0 to 100
+  installStage?: string;    // e.g. "Downloading SteamCMD...", etc.
 }
 
 export interface Backup {
@@ -41,6 +46,8 @@ export interface SystemStats {
   containersRunning: number;
   networkIn: number;  // MB/s
   networkOut: number; // MB/s
+  cpuHistory?: number[];
+  ramHistory?: number[];
 }
 
 export type UserRole = "admin" | "operator" | "viewer";
@@ -72,4 +79,17 @@ export interface GameTemplate {
   recommendedRam: number; // MB
   defaultVariables: Record<string, string>;
   iconUrl?: string;
+}
+
+export interface StorageDisk {
+  id: string;
+  device: string;
+  label: string;
+  capacity: number; // GB
+  used: number; // GB
+  fsType: string;
+  mountPoint: string;
+  status: "mounted" | "unmounted" | "raw" | "formatting";
+  activity: string;
+  type: string;
 }
