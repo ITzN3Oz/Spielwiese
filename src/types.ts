@@ -24,6 +24,7 @@ export interface GameServer {
   diskThrottle?: number; // Disk write limit in MB/s
   installProgress?: number; // 0 to 100
   installStage?: string;    // e.g. "Downloading SteamCMD...", etc.
+  ipAddress?: string;       // Dynamic or persistent IP address
 }
 
 export interface Backup {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { SystemStats, GameServer } from "../types";
-import { Cpu, Database, Network, HardDrive, ShieldCheck, Play, Square, Activity, RefreshCw } from "lucide-react";
+import { Cpu, Database, Network, HardDrive, ShieldCheck, Play, Square, Activity, RefreshCw, Globe } from "lucide-react";
 import { useLanguage } from "../LanguageContext";
 import GameIcon from "./GameIcon";
 import DiskManager from "./DiskManager";
@@ -311,7 +311,17 @@ export default function Overview({ stats, servers, onToggleServer, accentColor =
                     <div>
                       <h4 className="font-semibold text-white text-sm">{srv.name}</h4>
                       <div className="flex items-center gap-2 mt-1 text-xs text-neutral-450 font-mono">
-                        <span className="bg-neutral-900 px-1.5 py-0.5 rounded text-neutral-400 border border-neutral-850">{srv.portMapping}</span>
+                        <span 
+                          className="bg-neutral-900 px-1.5 py-0.5 rounded text-neutral-300 hover:text-indigo-400 transition-colors border border-neutral-850 cursor-pointer flex items-center gap-1"
+                          title="IP:Port kopieren"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigator.clipboard.writeText(`${srv.ipAddress || "127.0.0.1"}:${srv.portMapping.split(":")[0]}`);
+                          }}
+                        >
+                          <Globe className="w-3 h-3 text-indigo-400" />
+                          {srv.ipAddress || "127.0.0.1"}:{srv.portMapping.split(":")[0]}
+                        </span>
                         <span>•</span>
                         <span>{srv.version}</span>
                       </div>

@@ -7,9 +7,17 @@ import { exec, execSync } from "child_process";
 import { createServer as createViteServer } from "vite";
 import { GameServer, Backup, DashboardUser, ServerLog, SystemStats } from "./src/types";
 
-// Helper to fetch JSON from HTTPS endpoints
+// Helper to fetch JSON from HTTPS endpoints with a strict timeout to prevent hanging on host environments
 function fetchJson(url: string, headers: Record<string, string> = {}): Promise<any> {
   return new Promise((resolve, reject) => {
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        resolve(null);
+      }
+    }, 2500); // Strict 2.5 second timeout
+
     try {
       const urlObj = new URL(url);
       const options = {
@@ -18,28 +26,92 @@ function fetchJson(url: string, headers: Record<string, string> = {}): Promise<a
         headers: {
           "User-Agent": "Gameserver-Labor-App/1.0",
           ...headers
-        }
+        },
+        timeout: 2000
       };
-      https.get(options, (res) => {
+      
+      const req = https.get(options, (res) => {
         let data = "";
         res.on("data", (chunk) => {
           data += chunk;
         });
         res.on("end", () => {
-          try {
-            resolve(JSON.parse(data));
-          } catch (e) {
-            resolve(null); // Resolve null on JSON parsing errors
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timer);
+            try {
+              resolve(JSON.parse(data));
+            } catch (e) {
+              resolve(null);
+            }
           }
         });
-      }).on("error", (err) => {
-        resolve(null); // Resolve null on network errors to prevent crashing
+      });
+
+      req.on("error", (err) => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          resolve(null);
+        }
+      });
+
+      req.on("timeout", () => {
+        req.destroy();
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          resolve(null);
+        }
       });
     } catch (err) {
-      resolve(null);
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timer);
+        resolve(null);
+      }
     }
   });
 }
+
+// Host IP address detection
+let cachedPublicIp: string | null = null;
+
+async function detectPublicIp() {
+  try {
+    const data = await fetchJson("https://api.ipify.org?format=json");
+    if (data && data.ip) {
+      cachedPublicIp = data.ip;
+      console.log(`[G-Core Network] Public IP address detected: ${cachedPublicIp}`);
+    }
+  } catch (e) {
+    // Silent fallback
+  }
+}
+detectPublicIp();
+
+function getHostIPAddress(): string {
+  if (cachedPublicIp) {
+    return cachedPublicIp;
+  }
+  
+  try {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+      const netInterface = interfaces[name];
+      if (netInterface) {
+        for (const net of netInterface) {
+          if (net.family === "IPv4" && !net.internal) {
+            return net.address;
+          }
+        }
+      }
+    }
+  } catch (e) {}
+  
+  return "127.0.0.1";
+}
+
 
 // Physical storage root on target host
 const VOLUMES_ROOT = process.env.DATA_DIR 
@@ -208,6 +280,30 @@ function addServerHistory(serverId: string, type: string, message: string) {
   saveDatabase(dbData);
 }
 
+function addServerLog(serverId: string, type: "info" | "warn" | "error", message: string) {
+  try {
+    const dbData = loadDatabase();
+    if (!dbData.logs) {
+      dbData.logs = [];
+    }
+    dbData.logs.push({
+      id: "log-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6),
+      serverId,
+      timestamp: new Date().toISOString(),
+      type,
+      message
+    });
+    const srvLogs = dbData.logs.filter((l: any) => l.serverId === serverId);
+    if (srvLogs.length > 100) {
+      const firstIdx = dbData.logs.findIndex((l: any) => l.serverId === serverId);
+      if (firstIdx !== -1) dbData.logs.splice(firstIdx, 1);
+    }
+    saveDatabase(dbData);
+  } catch (err) {
+    console.error("Failed to write log", err);
+  }
+}
+
 // CPU load metrics calculations
 let lastCpuInfo = getCpuTimes();
 
@@ -299,26 +395,63 @@ function startDockerContainer(srv: GameServer, serverDir: string) {
       }
     } catch (e) {}
 
+    const handleExecResult = (cmd: string, error: any, stdout: string, stderr: string) => {
+      if (error) {
+        console.error(`Docker execution error on command [${cmd}]:`, error);
+        addServerLog(srv.id, "error", `[DOCKER FEHLER] Command: ${cmd}\nExit Code: ${error.code}\nStderr: ${stderr || error.message}`);
+        
+        // Stop the server state in database since it failed to start physically
+        const dbData = loadDatabase();
+        const idx = dbData.servers.findIndex((s: GameServer) => s.id === srv.id);
+        if (idx !== -1) {
+          dbData.servers[idx].status = "stopped";
+          dbData.servers[idx].cpuUsage = 0;
+          dbData.servers[idx].memoryUsage = 0;
+          dbData.servers[idx].activePlayers = 0;
+          saveDatabase(dbData);
+        }
+      } else {
+        addServerLog(srv.id, "info", `[DOCKER ERFOLG] Container gestartet.`);
+      }
+    };
+
     if (exists) {
-      exec(`docker start ${srv.id}`);
+      addServerLog(srv.id, "info", `[Docker Engine] Starte existierenden Container '${srv.id}'...`);
+      exec(`docker start ${srv.id}`, (error, stdout, stderr) => {
+        handleExecResult(`docker start ${srv.id}`, error, stdout, stderr);
+      });
     } else {
+      addServerLog(srv.id, "info", `[Docker Engine] Erstelle neuen Container '${srv.id}' mit Image '${srv.dockerImage}'...`);
       const runCmd = `docker run -d --name ${srv.id} --restart unless-stopped -v "${serverDir}":${mountPath} -m ${srv.maxMemory}M ${portArgs} ${envString} ${srv.dockerImage}`;
-      exec(runCmd);
+      exec(runCmd, (error, stdout, stderr) => {
+        handleExecResult(runCmd, error, stdout, stderr);
+      });
     }
-  } catch (err) {
-    console.error(`Local system execution info: Docker socket is locked or missing on development emulator. Falling back to procedural monitoring state.`, err);
+  } catch (err: any) {
+    console.error(`Local system execution info: Docker socket is locked or missing.`, err);
+    addServerLog(srv.id, "warn", `[Docker Simulator] System läuft im Offline-Simulationsmodus: ${err.message}`);
   }
 }
 
 function stopDockerContainer(id: string) {
   try {
-    exec(`docker stop ${id}`);
+    exec(`docker stop ${id}`, (error, stdout, stderr) => {
+      if (error) {
+        addServerLog(id, "warn", `[Docker Fehler] Container konnte nicht sauber gestoppt werden: ${stderr || error.message}`);
+      } else {
+        addServerLog(id, "info", `[Docker Engine] Container erfolgreich gestoppt.`);
+      }
+    });
   } catch (err) {}
 }
 
 function deleteDockerContainer(id: string) {
   try {
-    exec(`docker rm -f ${id}`);
+    exec(`docker rm -f ${id}`, (error, stdout, stderr) => {
+      if (error) {
+        addServerLog(id, "warn", `[Docker Fehler] Container konnte nicht gelöscht werden: ${stderr || error.message}`);
+      }
+    });
   } catch (err) {}
 }
 
@@ -525,7 +658,12 @@ async function startServer() {
   // 2. GET all Game Servers
   app.get("/api/servers", (req, res) => {
     db = loadDatabase();
-    res.json(db.servers);
+    const hostIp = getHostIPAddress();
+    const serversWithIp = db.servers.map((s: any) => ({
+      ...s,
+      ipAddress: s.ipAddress || hostIp
+    }));
+    res.json(serversWithIp);
   });
 
   // 3. POST Install New Server with Physical Disk Mount directories
@@ -687,7 +825,10 @@ async function startServer() {
       currentStep++;
     }, 1000); // Progress is simulated seamlessly over ~9-10 seconds!
 
-    res.status(201).json(newServer);
+    res.status(201).json({
+      ...newServer,
+      ipAddress: getHostIPAddress()
+    });
   });
 
   // 4. POST Start/Stop Toggle Server (Binding real Docker & Physical Mounts)
@@ -2657,7 +2798,7 @@ services:
       - "3000:3000"
     volumes:
       - ./data:/app/data
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - NODE_ENV=production
       - HOST_PORT=3000

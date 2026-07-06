@@ -24,7 +24,8 @@ import {
   Hammer,
   Maximize2,
   Minimize2,
-  Activity
+  Activity,
+  Globe
 } from "lucide-react";
 import ServerModsManager from "./ServerModsManager";
 import GameIcon from "./GameIcon";
@@ -452,8 +453,16 @@ export default function ServerList({
 
                   <div className="text-right flex flex-col items-end">
                     {getStatusBadge(srv.status)}
-                    <span className="text-[10px] text-neutral-500 font-mono mt-2 tracking-wide uppercase">
-                      Port: {srv.portMapping.split(":")[0]}
+                    <span 
+                      className="text-[10px] text-neutral-400 font-mono mt-2 tracking-wide uppercase flex items-center gap-1 cursor-pointer hover:text-indigo-400 transition-colors bg-neutral-900/50 px-1.5 py-0.5 rounded border border-neutral-850"
+                      title="IP:Port in Zwischenablage kopieren"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCopyCommand(`${srv.ipAddress || "127.0.0.1"}:${srv.portMapping.split(":")[0]}`);
+                      }}
+                    >
+                      <Globe className="w-3 h-3 text-indigo-400 animate-pulse" />
+                      {srv.ipAddress || "127.0.0.1"}:{srv.portMapping.split(":")[0]}
                     </span>
                   </div>
                 </div>
